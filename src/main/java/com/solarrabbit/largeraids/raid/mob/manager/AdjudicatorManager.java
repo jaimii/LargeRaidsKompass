@@ -59,32 +59,54 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
 
     private void handleAdjudicatorAttack(Vindicator vindicator) {
         LivingEntity target = vindicator.getTarget();
-        if (target == null || target.isDead()) return;
+        if (target == null || target.isDead()) {
+            stopUsingSpear(vindicator);
+            return;
+        }
 
         // Skip creative/spectator players
         if (target instanceof Player) {
             Player p = (Player) target;
             if (p.getGameMode() == GameMode.CREATIVE || p.getGameMode() == GameMode.SPECTATOR) {
+                stopUsingSpear(vindicator);
                 return;
             }
         }
 
+        // Prevent attacking through solid walls
+        if (!vindicator.hasLineOfSight(target)) {
+            stopUsingSpear(vindicator);
+            return;
+        }
+
         double distanceSq = vindicator.getLocation().distanceSquared(target.getLocation());
-        // Jousting connection range (covers horse size collision & rider height offset perfectly)
-        if (distanceSq <= 12.0) {
+
+        // Spear has an extended combat reach (~5.2 blocks on foot).
+        // If riding a horse, we extend this to 6.0 blocks to offset the horse's wider collision box.
+        double maxReach = vindicator.isInsideVehicle() ? 6.0 : 5.2;
+        double maxReachSq = maxReach * maxReach;
+
+        if (distanceSq > maxReachSq && distanceSq <= 144.0) {
+            // Further than combat reach but within distance: hold & point spear forward (charge stance)
+            startUsingSpear(vindicator);
+        } else if (distanceSq <= maxReachSq) {
+            // Close enough: stop holding/using the spear to execute the manual sweep hit
+            stopUsingSpear(vindicator);
+
             long now = System.currentTimeMillis();
             long lastAttack = attackCooldowns.getOrDefault(vindicator, 0L);
             if ((now - lastAttack) >= 1200) { // Cooldown of 1.2 seconds
                 performSpearAttack(vindicator, target);
                 attackCooldowns.put(vindicator, now);
             }
+        } else {
+            stopUsingSpear(vindicator);
         }
     }
 
     private void performSpearAttack(Vindicator vindicator, LivingEntity target) {
-        // Swing hand & play spear sounds
+        // Swing hand with spear
         vindicator.swingMainHand();
-        vindicator.getWorld().playSound(vindicator.getLocation(), Sound.ITEM_TRIDENT_THROW, 1.0F, 1.2F);
         vindicator.getWorld().spawnParticle(org.bukkit.Particle.SWEEP_ATTACK, target.getLocation().add(0, 1, 0), 1);
 
         double damage = 6.0;
@@ -100,6 +122,52 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
         }
 
         target.damage(damage, vindicator);
+    }
+
+    private void startUsingSpear(Vindicator vindicator) {
+        try {
+            java.lang.reflect.Method getHandleMethod = vindicator.getClass().getMethod("getHandle");
+            Object nmsVindicator = getHandleMethod.invoke(vindicator);
+
+            // Check if they are already using an active item to avoid packet flooding
+            java.lang.reflect.Method isUsingItemMethod = nmsVindicator.getClass().getMethod("isUsingItem");
+            boolean isUsing = (boolean) isUsingItemMethod.invoke(nmsVindicator);
+
+            if (!isUsing) {
+                Class<?> handClass = Class.forName("net.minecraft.world.InteractionHand");
+                Object mainHand = handClass.getField("MAIN_HAND").get(null);
+
+                java.lang.reflect.Method startUsingMethod = null;
+                for (java.lang.reflect.Method m : nmsVindicator.getClass().getMethods()) {
+                    if (m.getName().equals("startUsingItem") && m.getParameterCount() == 1 && m.getParameterTypes()[0] == handClass) {
+                        startUsingMethod = m;
+                        break;
+                    }
+                }
+                if (startUsingMethod != null) {
+                    startUsingMethod.invoke(nmsVindicator, mainHand);
+                }
+            }
+        } catch (Exception e) {
+            // Ignore silently
+        }
+    }
+
+    private void stopUsingSpear(Vindicator vindicator) {
+        try {
+            java.lang.reflect.Method getHandleMethod = vindicator.getClass().getMethod("getHandle");
+            Object nmsVindicator = getHandleMethod.invoke(vindicator);
+
+            java.lang.reflect.Method isUsingItemMethod = nmsVindicator.getClass().getMethod("isUsingItem");
+            boolean isUsing = (boolean) isUsingItemMethod.invoke(nmsVindicator);
+
+            if (isUsing) {
+                java.lang.reflect.Method stopUsingMethod = nmsVindicator.getClass().getMethod("stopUsingItem");
+                stopUsingMethod.invoke(nmsVindicator);
+            }
+        } catch (Exception e) {
+            // Ignore silently
+        }
     }
 
     private boolean isAdjudicator(Vindicator vindicator) {
