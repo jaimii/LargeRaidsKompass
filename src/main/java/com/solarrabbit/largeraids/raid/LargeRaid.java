@@ -113,8 +113,12 @@ public class LargeRaid {
     void spawnWave() {
         List<Raider> raiders = currentRaid.getRaiders();
         Location loc = getWaveSpawnLocation();
+        if (loc == null) {
+            loc = getRandomSpawnLocation(getCenter());
+        }
 
-        if (getCenter().distanceSquared(loc) >= Math.pow(RADIUS, 2)) {
+        // happens when spawned mobs are too far from the village (using RADIUS + 16 to compensate)
+        if (getCenter().distanceSquared(loc) >= Math.pow(RADIUS + 16, 2)) {
             for (Raider raider : raiders) {
                 removeRaiderAndMount(raider);
             }
@@ -144,7 +148,6 @@ public class LargeRaid {
                         ravager.setInvulnerable(true);
                         newRaiders.add(ravager);
                     } else if (vehicle != null) {
-                        // Protect non-Raider vehicles (like Horses) safely
                         vehicle.setInvulnerable(true);
                         nonRaiderVehicles.add(vehicle);
                     }
@@ -353,7 +356,34 @@ public class LargeRaid {
             return raidSpawn;
 
         List<Raider> list = this.currentRaid.getRaiders();
-        return list.isEmpty() ? null : list.get(0).getLocation();
+        if (list.isEmpty()) {
+            return getRandomSpawnLocation(getCenter());
+        }
+        return list.get(0).getLocation();
+    }
+
+    private Location getRandomSpawnLocation(Location center) {
+        World world = center.getWorld();
+        if (world == null) return center;
+
+        java.util.Random random = new java.util.Random();
+        for (int i = 0; i < 30; i++) {
+            double angle = random.nextDouble() * 2 * Math.PI;
+            double distance = 48 + random.nextDouble() * 16; // Spawn 48 to 64 blocks away from village center
+
+            int x = (int) (center.getX() + Math.cos(angle) * distance);
+            int z = (int) (center.getZ() + Math.sin(angle) * distance);
+
+            int y = world.getHighestBlockYAt(x, z);
+            org.bukkit.block.Block block = world.getBlockAt(x, y, z);
+            org.bukkit.block.Block below = world.getBlockAt(x, y - 1, z);
+
+            // Confirm the block below is solid/spawnable and target block is air
+            if (below.getType().isSolid() && block.getType().isAir()) {
+                return new Location(world, x + 0.5, y, z + 0.5);
+            }
+        }
+        return center; // Fallback if no safe blocks are found
     }
 
     private void prepareLastWave() {

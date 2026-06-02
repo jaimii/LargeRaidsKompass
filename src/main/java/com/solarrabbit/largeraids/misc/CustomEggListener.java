@@ -173,7 +173,7 @@ public class CustomEggListener implements Listener {
             case "adjudicator":
                 AdjudicatorManager adjudicatorManager = new AdjudicatorManager();
                 adjudicatorManager.loadSettings(plugin.getCustomMobsConfig());
-                adjudicatorManager.spawn(loc);
+                adjudicatorManager.spawnRider(loc); // Changed to spawn as a mounted rider
                 break;
             default:
                 plugin.getLogger().warning("Attempted to spawn unknown custom variant: " + variant);

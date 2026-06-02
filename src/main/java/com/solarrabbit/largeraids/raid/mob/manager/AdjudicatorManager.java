@@ -37,6 +37,7 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
     private double health;
     private double horseHealth;
     private final java.util.WeakHashMap<Vindicator, Long> attackCooldowns = new java.util.WeakHashMap<>();
+    private final java.util.WeakHashMap<Vindicator, Boolean> hasHitInCurrentCycle = new java.util.WeakHashMap<>();
 
     public AdjudicatorManager() {
         LargeRaids plugin = JavaPlugin.getPlugin(LargeRaids.class);
@@ -61,6 +62,7 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
         LivingEntity target = vindicator.getTarget();
         if (target == null || target.isDead()) {
             stopUsingSpear(vindicator);
+            hasHitInCurrentCycle.put(vindicator, false);
             return;
         }
 
@@ -69,6 +71,7 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
             Player p = (Player) target;
             if (p.getGameMode() == GameMode.CREATIVE || p.getGameMode() == GameMode.SPECTATOR) {
                 stopUsingSpear(vindicator);
+                hasHitInCurrentCycle.put(vindicator, false);
                 return;
             }
         }
@@ -86,20 +89,36 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
         double maxReach = vindicator.isInsideVehicle() ? 6.0 : 5.2;
         double maxReachSq = maxReach * maxReach;
 
-        if (distanceSq > maxReachSq && distanceSq <= 144.0) {
-            // Further than combat reach but within distance: hold & point spear forward (charge stance)
-            startUsingSpear(vindicator);
-        } else if (distanceSq <= maxReachSq) {
-            // Close enough: stop holding/using the spear to execute the manual sweep hit
-            stopUsingSpear(vindicator);
+        boolean hit = hasHitInCurrentCycle.getOrDefault(vindicator, false);
 
-            long now = System.currentTimeMillis();
-            long lastAttack = attackCooldowns.getOrDefault(vindicator, 0L);
-            if ((now - lastAttack) >= 1200) { // Cooldown of 1.2 seconds
-                performSpearAttack(vindicator, target);
-                attackCooldowns.put(vindicator, now);
+        // Reset the hit cycle once they retreat far enough away (further than 6.5 blocks)
+        if (hit && distanceSq > 42.25) { // 6.5^2 = 42.25
+            hit = false;
+            hasHitInCurrentCycle.put(vindicator, false);
+        }
+
+        if (!hit) {
+            // Force the Adjudicator to charge directly at the target until they successfully land a hit
+            moveTowardsTarget(vindicator, target, 1.25);
+
+            if (distanceSq > maxReachSq) {
+                // Further than combat reach: raise and point spear forward (charge stance)
+                startUsingSpear(vindicator);
+            } else {
+                // Close enough: stop using spear to swing
+                stopUsingSpear(vindicator);
+
+                long now = System.currentTimeMillis();
+                long lastAttack = attackCooldowns.getOrDefault(vindicator, 0L);
+                if ((now - lastAttack) >= 1200) { // Cooldown of 1.2 seconds
+                    performSpearAttack(vindicator, target);
+                    attackCooldowns.put(vindicator, now);
+                    hasHitInCurrentCycle.put(vindicator, true); // Allow retreat phase now that damage is confirmed
+                }
             }
         } else {
+            // They have successfully landed their hit in this cycle.
+            // Stop overriding their pathfinder so native SpearUseGoal's retreat AI can execute.
             stopUsingSpear(vindicator);
         }
     }
@@ -124,12 +143,37 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
         target.damage(damage, vindicator);
     }
 
+    private void moveTowardsTarget(Vindicator vindicator, LivingEntity target, double speed) {
+        try {
+            // Attempt standard Paper Pathfinder API (completely independent of version mappings)
+            java.lang.reflect.Method getPathfinderMethod = vindicator.getClass().getMethod("getPathfinder");
+            Object pathfinder = getPathfinderMethod.invoke(vindicator);
+            if (pathfinder != null) {
+                java.lang.reflect.Method moveToMethod = pathfinder.getClass().getMethod("moveTo", org.bukkit.Location.class, double.class);
+                moveToMethod.invoke(pathfinder, target.getLocation(), speed);
+            }
+        } catch (Exception e) {
+            // Fallback: use native NMS navigation if Paper's pathfinder is absent or signature-modified
+            try {
+                java.lang.reflect.Method getHandleMethod = vindicator.getClass().getMethod("getHandle");
+                Object nmsVindicator = getHandleMethod.invoke(vindicator);
+                java.lang.reflect.Method getNavigationMethod = nmsVindicator.getClass().getMethod("getNavigation");
+                Object navigation = getNavigationMethod.invoke(nmsVindicator);
+                if (navigation != null) {
+                    java.lang.reflect.Method moveToMethod = navigation.getClass().getMethod("moveTo", double.class, double.class, double.class, double.class);
+                    moveToMethod.invoke(navigation, target.getLocation().getX(), target.getLocation().getY(), target.getLocation().getZ(), speed);
+                }
+            } catch (Exception ex) {
+                // Ignore silently
+            }
+        }
+    }
+
     private void startUsingSpear(Vindicator vindicator) {
         try {
             java.lang.reflect.Method getHandleMethod = vindicator.getClass().getMethod("getHandle");
             Object nmsVindicator = getHandleMethod.invoke(vindicator);
 
-            // Check if they are already using an active item to avoid packet flooding
             java.lang.reflect.Method isUsingItemMethod = nmsVindicator.getClass().getMethod("isUsingItem");
             boolean isUsing = (boolean) isUsingItemMethod.invoke(nmsVindicator);
 
@@ -215,7 +259,11 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
         Horse horse = (Horse) location.getWorld().spawnEntity(location, EntityType.HORSE);
         horse.getAttribute(Attribute.MAX_HEALTH).setBaseValue(horseHealth);
         horse.setHealth(horseHealth);
+
+        // Equip both a Saddle and Iron Horse Armor
         horse.getInventory().setSaddle(new ItemStack(Material.SADDLE));
+        horse.getInventory().setArmor(new ItemStack(Material.IRON_HORSE_ARMOR));
+
         horse.setTamed(true);
         horse.setCustomName("§6Adjudicator's Steed");
 
