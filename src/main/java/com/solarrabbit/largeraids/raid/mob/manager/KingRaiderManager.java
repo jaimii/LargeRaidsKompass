@@ -2,7 +2,6 @@ package com.solarrabbit.largeraids.raid.mob.manager;
 
 import com.solarrabbit.largeraids.LargeRaids;
 import com.solarrabbit.largeraids.config.custommobs.CustomMobsConfig;
-import com.solarrabbit.largeraids.config.custommobs.KingRaiderConfig;
 import com.solarrabbit.largeraids.raid.mob.KingRaider;
 import com.solarrabbit.largeraids.util.VersionUtil;
 
