@@ -163,8 +163,8 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                     ? (LivingEntity) vindicator.getVehicle()
                     : vindicator;
 
-            // Adjusted speed multiplier for horse riders (1.45 vs 1.12 on foot)
-            double chargeSpeedMultiplier = riding ? 1.45 : 0.60;
+            // Adjusted speed multiplier
+            double chargeSpeedMultiplier = riding ? 1.45 : 1.12;
             moveTowardsTarget(activeMover, target.getLocation(), chargeSpeedMultiplier);
 
             if (distanceSq > maxReachSq) {
@@ -201,7 +201,7 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                     : vindicator;
 
             // Active manual retreat pathing
-            double retreatSpeedMultiplier = riding ? 1.55 : 1.35;
+            double retreatSpeedMultiplier = riding ? 1.40 : 0.60;
             moveTowardsTarget(activeMover, retreatLoc, retreatSpeedMultiplier);
         }
     }
@@ -313,13 +313,13 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                     // Play spear charge sound
                     playSpearSound(vindicator, "ITEM_SPEAR_USE", 1.0F, 1.0F);
 
-                    // Smoothly offset 0.2x vanilla use penalty on foot (1.75 modifier is natural)
+                    // Smoothly offset use penalty on foot
                     if (!vindicator.isInsideVehicle()) {
                         AttributeInstance speedAttribute = vindicator.getAttribute(Attribute.MOVEMENT_SPEED);
                         if (speedAttribute != null) {
                             speedAttribute.removeModifier(speedKey); // Clear existing
                             AttributeModifier modifier = new AttributeModifier(
-                                    speedKey, 1.75, AttributeModifier.Operation.ADD_NUMBER
+                                    speedKey, 0.20, AttributeModifier.Operation.ADD_NUMBER
                             );
                             speedAttribute.addModifier(modifier);
                         }
@@ -440,7 +440,7 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
         // Match standard Vindicator tracking distance
         AttributeInstance followRange = vindicator.getAttribute(Attribute.FOLLOW_RANGE);
         if (followRange != null) {
-            followRange.setBaseValue(32.0);
+            followRange.setBaseValue(64.0);
         }
 
         vindicator.getAttribute(Attribute.MAX_HEALTH).setBaseValue(health);

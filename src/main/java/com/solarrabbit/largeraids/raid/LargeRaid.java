@@ -30,6 +30,7 @@ import com.solarrabbit.largeraids.util.VersionUtil;
 import org.bukkit.Bukkit;
 import org.bukkit.Difficulty;
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.Raid;
 import org.bukkit.Sound;
 import org.bukkit.World;
@@ -100,7 +101,18 @@ public class LargeRaid {
         currentWave++;
         broadcastWave();
 
-        getCurrentNMSRaid().stop();
+        AbstractRaidWrapper nmsRaid = getCurrentNMSRaid();
+        if (nmsRaid != null) {
+            Object nmsRaidObj = getNMSRaidObject(nmsRaid);
+            int raidId = getRaidId(nmsRaidObj);
+
+            nmsRaid.stop();
+
+            if (raidId != -1) {
+                removeRaidFromNMS(getCenter(), raidId);
+            }
+        }
+
         AbstractRaidWrapper raid = createRaid(getCenter());
         if (raid.isEmpty())
             return;
@@ -111,19 +123,37 @@ public class LargeRaid {
     }
 
     void spawnWave() {
+        spawnWave(null);
+    }
+
+    void spawnWave(Location vanillaSpawnLoc) {
         List<Raider> raiders = currentRaid.getRaiders();
-        Location loc = getWaveSpawnLocation();
+        Location loc = getWaveSpawnLocation(vanillaSpawnLoc);
+
         if (loc == null) {
             loc = getRandomSpawnLocation(getCenter());
         }
 
-        // happens when spawned mobs are too far from the village (using RADIUS + 16 to compensate)
-        if (getCenter().distanceSquared(loc) >= Math.pow(RADIUS + 16, 2)) {
+        // Calculate 2D horizontal distance to accurately detect center spawns regardless of height (e.g. sky breeder bases)
+        double locX = loc.getX();
+        double locZ = loc.getZ();
+        double centerX = getCenter().getX();
+        double centerZ = getCenter().getZ();
+        double horizontalDistSq = (locX - centerX) * (locX - centerX) + (locZ - centerZ) * (locZ - centerZ);
+
+        // Define bounds: out of bounds, or too close horizontally (indicating a center-spawn fallback glitch)
+        boolean outOfBounds = horizontalDistSq >= Math.pow(RADIUS + 16, 2);
+        boolean glitchedAtCenter = horizontalDistSq <= 256.0; // Within 16 blocks horizontally
+
+        if (outOfBounds || glitchedAtCenter) {
+            // Cancel the spawn immediately by removing the raiders
             for (Raider raider : raiders) {
                 removeRaiderAndMount(raider);
             }
-            if (!isLastWave())
+            if (!isLastWave()) {
+                // Force-advance to the next wave of the raid
                 triggerNextWave();
+            }
             return;
         }
 
@@ -293,7 +323,8 @@ public class LargeRaid {
 
     public boolean isSimilar(Raid raid) {
         Objects.requireNonNull(currentRaid);
-        return this.currentRaid.getLocation().equals(raid.getLocation());
+        return this.currentRaid.getLocation().getWorld().equals(raid.getLocation().getWorld())
+                && this.currentRaid.getLocation().distanceSquared(raid.getLocation()) <= 1024.0;
     }
 
     void incrementPlayerKill(Player player) {
@@ -352,8 +383,16 @@ public class LargeRaid {
     }
 
     private Location getWaveSpawnLocation() {
+        return getWaveSpawnLocation(null);
+    }
+
+    private Location getWaveSpawnLocation(Location vanillaSpawnLoc) {
         if (raidSpawn != null)
             return raidSpawn;
+
+        if (vanillaSpawnLoc != null) {
+            return vanillaSpawnLoc;
+        }
 
         List<Raider> list = this.currentRaid.getRaiders();
         if (list.isEmpty()) {
@@ -367,7 +406,7 @@ public class LargeRaid {
         if (world == null) return center;
 
         java.util.Random random = new java.util.Random();
-        for (int i = 0; i < 30; i++) {
+        for (int i = 0; i < 50; i++) { // Increased search bounds to 50 attempts
             double angle = random.nextDouble() * 2 * Math.PI;
             double distance = 48 + random.nextDouble() * 16; // Spawn 48 to 64 blocks away from village center
 
@@ -377,13 +416,24 @@ public class LargeRaid {
             int y = world.getHighestBlockYAt(x, z);
             org.bukkit.block.Block block = world.getBlockAt(x, y, z);
             org.bukkit.block.Block below = world.getBlockAt(x, y - 1, z);
+            org.bukkit.block.Block above = world.getBlockAt(x, y + 1, z);
 
-            // Confirm the block below is solid/spawnable and target block is air
-            if (below.getType().isSolid() && block.getType().isAir()) {
+            // Resilient check verifying block below is solid, while blocks at Y and Y+1 are passable (handles snow cover, tall grass, flowers, etc.)
+            if (below.getType().isSolid() && isBlockPassable(block) && isBlockPassable(above)) {
                 return new Location(world, x + 0.5, y, z + 0.5);
             }
         }
         return center; // Fallback if no safe blocks are found
+    }
+
+    private boolean isBlockPassable(org.bukkit.block.Block block) {
+        if (block == null) return true;
+        try {
+            return block.isPassable();
+        } catch (NoSuchMethodError e) {
+            Material type = block.getType();
+            return type.isAir() || type == Material.SNOW || type.name().contains("GRASS") || type.name().contains("FLOWER");
+        }
     }
 
     private void prepareLastWave() {
@@ -488,5 +538,103 @@ public class LargeRaid {
             default:
                 return 0;
         }
+    }
+
+    // --- Resilient Reflection Helpers to bypass same-tick map conflicts ---
+
+    private Object getNMSRaidObject(AbstractRaidWrapper wrapper) {
+        if (wrapper == null) return null;
+        try {
+            try {
+                java.lang.reflect.Field f = wrapper.getClass().getDeclaredField("raid");
+                f.setAccessible(true);
+                return f.get(wrapper);
+            } catch (NoSuchFieldException ignored) {}
+
+            for (java.lang.reflect.Field f : wrapper.getClass().getDeclaredFields()) {
+                if (f.getType().getName().equals("net.minecraft.world.entity.raid.Raid")) {
+                    f.setAccessible(true);
+                    return f.get(wrapper);
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private int getRaidId(Object nmsRaid) {
+        if (nmsRaid == null) return -1;
+        try {
+            try {
+                java.lang.reflect.Field f = nmsRaid.getClass().getDeclaredField("id");
+                f.setAccessible(true);
+                return (int) f.get(nmsRaid);
+            } catch (NoSuchFieldException ignored) {}
+
+            for (java.lang.reflect.Field f : nmsRaid.getClass().getDeclaredFields()) {
+                if (f.getType() == int.class && !java.lang.reflect.Modifier.isStatic(f.getModifiers())) {
+                    f.setAccessible(true);
+                    return (int) f.get(nmsRaid);
+                }
+            }
+        } catch (Exception ignored) {}
+        return -1;
+    }
+
+    private Object getNMSRaidsObject(AbstractRaidsWrapper wrapper) {
+        if (wrapper == null) return null;
+        try {
+            try {
+                java.lang.reflect.Field f = wrapper.getClass().getDeclaredField("raids");
+                f.setAccessible(true);
+                return f.get(wrapper);
+            } catch (NoSuchFieldException ignored) {}
+
+            for (java.lang.reflect.Field f : wrapper.getClass().getDeclaredFields()) {
+                if (f.getType().getName().equals("net.minecraft.world.entity.raid.Raids")) {
+                    f.setAccessible(true);
+                    return f.get(wrapper);
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private java.util.Map<Integer, ?> getRaidMap(Object nmsRaids) {
+        if (nmsRaids == null) return null;
+        try {
+            try {
+                java.lang.reflect.Field f = nmsRaids.getClass().getDeclaredField("raidMap");
+                f.setAccessible(true);
+                return (java.util.Map<Integer, ?>) f.get(nmsRaids);
+            } catch (NoSuchFieldException ignored) {}
+
+            try {
+                java.lang.reflect.Field f = nmsRaids.getClass().getDeclaredField("raids");
+                f.setAccessible(true);
+                return (java.util.Map<Integer, ?>) f.get(nmsRaids);
+            } catch (NoSuchFieldException ignored) {}
+
+            for (java.lang.reflect.Field f : nmsRaids.getClass().getDeclaredFields()) {
+                if (java.util.Map.class.isAssignableFrom(f.getType())) {
+                    f.setAccessible(true);
+                    return (java.util.Map<Integer, ?>) f.get(nmsRaids);
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private void removeRaidFromNMS(Location location, int raidId) {
+        try {
+            AbstractWorldServerWrapper level = VersionUtil.getCraftWorldWrapper(location.getWorld()).getHandle();
+            AbstractRaidsWrapper raidsWrapper = level.getRaids();
+            Object nmsRaids = getNMSRaidsObject(raidsWrapper);
+            if (nmsRaids != null) {
+                java.util.Map<Integer, ?> raidMap = getRaidMap(nmsRaids);
+                if (raidMap != null) {
+                    raidMap.remove(raidId);
+                }
+            }
+        } catch (Exception ignored) {}
     }
 }

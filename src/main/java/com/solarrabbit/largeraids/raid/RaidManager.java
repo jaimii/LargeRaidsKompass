@@ -72,10 +72,16 @@ public class RaidManager implements Listener {
 
     @EventHandler
     private void onSpawn(RaidSpawnWaveEvent evt) {
+        Location spawnLoc = null;
+        if (evt.getRaiders() != null && !evt.getRaiders().isEmpty()) {
+            spawnLoc = evt.getRaiders().get(0).getLocation().clone();
+        }
+
+        final Location finalSpawnLoc = spawnLoc;
         // TODO Confirm to prevent ConcurrentModificationException
         Bukkit.getScheduler().runTask(plugin, () -> getLargeRaid(evt.getRaid()).ifPresent(largeRaid -> {
             setIdle();
-            largeRaid.spawnWave();
+            largeRaid.spawnWave(finalSpawnLoc);
             setActive();
         }));
     }
@@ -159,16 +165,16 @@ public class RaidManager implements Listener {
 
     private void tick() {
         PotionEffect effect = new PotionEffect(PotionEffectType.GLOWING, 5, 0);
-        for (LargeRaid largeRaid : currentRaids)
-            // Each vanilla raid is supposed to spawn one wave, before being replaced by another instance of raid.
-            // If the first wave has spawned and all raiders are dead, this indicates that it is time to trigger the next wave.
+        for (LargeRaid largeRaid : currentRaids) {
             if (largeRaid.isActive() && largeRaid.getTotalRaidersAlive() == 0 && largeRaid.firstWaveSpawned()
                     && !largeRaid.isLastWave()) {
                 setIdle();
                 largeRaid.triggerNextWave();
                 setActive();
-            } else if (largeRaid.areRaidersOutlined())
+            } else if (largeRaid.areRaidersOutlined()) {
                 largeRaid.applyGlowing();
+            }
+        }
 
         Iterator<AbstractRaidWrapper> itr = outlinedRaids.iterator();
         while (itr.hasNext()) {
