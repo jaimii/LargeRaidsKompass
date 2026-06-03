@@ -12,19 +12,23 @@ import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
-import org.bukkit.Sound;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.block.banner.Pattern;
 import org.bukkit.block.banner.PatternType;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.EvokerFangs;
 import org.bukkit.entity.Horse;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
+import org.bukkit.entity.Raider;
 import org.bukkit.entity.Vindicator;
+import org.bukkit.entity.Witch;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.ItemFlag;
@@ -34,25 +38,58 @@ import org.bukkit.inventory.meta.ShieldMeta;
 import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.projectiles.ProjectileSource;
 import org.bukkit.util.Vector;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import java.util.WeakHashMap;
 
 public class AdjudicatorManager implements CustomRaiderManager, Listener {
     private double health;
     private double horseHealth;
-    private final java.util.WeakHashMap<Vindicator, Long> attackCooldowns = new java.util.WeakHashMap<>();
-    private final java.util.WeakHashMap<Vindicator, Boolean> hasHitInCurrentCycle = new java.util.WeakHashMap<>();
+
+    private final LargeRaids plugin;
+    private final NamespacedKey adjudicatorKey;
+    private final NamespacedKey horseKey;
+    private final NamespacedKey speedKey;
+
+    private final WeakHashMap<Vindicator, Long> attackCooldowns = new WeakHashMap<>();
+    private final WeakHashMap<Vindicator, Boolean> hasHitInCurrentCycle = new WeakHashMap<>();
+
+    // Lazy Reflection Cache
+    private static Method getPathfinderMethod;
+    private static Method moveToPathfinderMethod;
+    private static Method getHandleMethod;
+    private static Method getNavigationMethod;
+    private static Method moveToNavigationMethod;
+    private static Method isUsingItemMethod;
+    private static Method stopUsingItemMethod;
+    private static Method startUsingItemMethod;
+    private static Field goalSelectorField;
+    private static Field availableGoalsField;
+    private static Method getGoalMethod;
+    private static Method removeGoalMethod;
+    private static Object mainHandEnum;
 
     public AdjudicatorManager() {
-        LargeRaids plugin = JavaPlugin.getPlugin(LargeRaids.class);
-        startTickTask(plugin);
+        this.plugin = JavaPlugin.getPlugin(LargeRaids.class);
+        this.adjudicatorKey = new NamespacedKey(plugin, "adjudicator");
+        this.horseKey = new NamespacedKey(plugin, "adjudicator_horse_uuid");
+        this.speedKey = new NamespacedKey(plugin, "adjudicator_charge_speed");
+        startTickTask();
     }
 
-    private void startTickTask(JavaPlugin plugin) {
+    private void startTickTask() {
         // Runs a lightweight proximity check task every 2 ticks (10 times a second)
         Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             for (org.bukkit.World world : Bukkit.getWorlds()) {
                 for (Vindicator vindicator : world.getEntitiesByClass(Vindicator.class)) {
-                    if (vindicator.isDead()) continue;
+                    if (vindicator.isDead() || !vindicator.isValid()) continue;
                     if (isAdjudicator(vindicator)) {
                         handleAdjudicatorAttack(vindicator);
                     }
@@ -94,9 +131,11 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
         double maxReachSq = maxReach * maxReach;
 
         boolean hit = hasHitInCurrentCycle.getOrDefault(vindicator, false);
+        long now = System.currentTimeMillis();
+        long lastAttack = attackCooldowns.getOrDefault(vindicator, 0L);
 
-        // Reset the hit cycle once they retreat far enough away (further than 6.5 blocks)
-        if (hit && distanceSq > 42.25) { // 6.5^2 = 42.25
+        // Reset the hit cycle once they retreat far enough (further than 6.5 blocks) OR if a 2.0s timeout is reached
+        if (hit && (distanceSq > 42.25 || (now - lastAttack) >= 2000)) {
             hit = false;
             hasHitInCurrentCycle.put(vindicator, false);
         }
@@ -107,26 +146,26 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                     ? (LivingEntity) vindicator.getVehicle()
                     : vindicator;
 
-            moveTowardsTarget(activeMover, target.getLocation(), 1.25);
+            // Adjusted speed multiplier for horse riders (1.45 vs 1.25 on foot)
+            double chargeSpeedMultiplier = riding ? 1.45 : 1.25;
+            moveTowardsTarget(activeMover, target.getLocation(), chargeSpeedMultiplier);
 
             if (distanceSq > maxReachSq) {
                 // Further than combat reach: raise and point spear forward (charge stance)
                 startUsingSpear(vindicator);
             } else {
-                // Close enough: stop using spear to swing
-                stopUsingSpear(vindicator);
-
-                long now = System.currentTimeMillis();
-                long lastAttack = attackCooldowns.getOrDefault(vindicator, 0L);
+                // Close enough: Trigger charge attack (keep spear raised during strike)
                 if ((now - lastAttack) >= 1200) { // Cooldown of 1.2 seconds
                     performSpearAttack(vindicator, target);
                     attackCooldowns.put(vindicator, now);
-                    hasHitInCurrentCycle.put(vindicator, true); // Allow retreat phase now that damage is confirmed
+                    hasHitInCurrentCycle.put(vindicator, true); // Transition to retreat phase
+
+                    // Lower spear immediately after successful charge impact
+                    stopUsingSpear(vindicator);
                 }
             }
         } else {
-            // They have successfully landed their hit in this cycle.
-            // Lower the spear during the retreat phase.
+            // They have successfully landed their hit in this cycle. Lower the spear during retreat.
             stopUsingSpear(vindicator);
 
             // Calculate retreat location (opposite direction of the target, 8 blocks away)
@@ -145,145 +184,212 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                     : vindicator;
 
             // Active manual retreat pathing
-            moveTowardsTarget(activeMover, retreatLoc, 1.35);
+            double retreatSpeedMultiplier = riding ? 1.55 : 1.35;
+            moveTowardsTarget(activeMover, retreatLoc, retreatSpeedMultiplier);
         }
     }
 
     private void performSpearAttack(Vindicator vindicator, LivingEntity target) {
-        // Swing hand with spear
         vindicator.swingMainHand();
-        vindicator.getWorld().spawnParticle(org.bukkit.Particle.SWEEP_ATTACK, target.getLocation().add(0, 1, 0), 1);
 
-        double damage = 6.0;
+        double baseDamage = 6.0;
         if (vindicator.getAttribute(Attribute.ATTACK_DAMAGE) != null) {
-            damage = vindicator.getAttribute(Attribute.ATTACK_DAMAGE).getValue();
+            baseDamage = vindicator.getAttribute(Attribute.ATTACK_DAMAGE).getValue();
         }
 
-        // Deal 1.5x damage on horseback to simulate jousting momentum
-        if (vindicator.isInsideVehicle()) {
-            damage *= 1.5;
-            // Play specialized spear jousting/lunge hit sound
-            playSpearSound(vindicator, "ITEM_SPEAR_LUNGE_1", 1.1F, 1.0F);
-            vindicator.getWorld().spawnParticle(org.bukkit.Particle.CRIT, target.getLocation().add(0, 1, 0), 5, 0.2, 0.2, 0.2, 0.1);
+        boolean riding = vindicator.isInsideVehicle();
+        double finalDamage = baseDamage;
+
+        // Apply scaling (1.5x on foot, 2.0x on horse due to momentum)
+        if (riding) {
+            finalDamage *= 2.0;
+            playSpearSound(vindicator, "ITEM_SPEAR_LUNGE_1", 1.2F, 0.9F);
+            target.getWorld().spawnParticle(org.bukkit.Particle.CRIT, target.getLocation().add(0, 1, 0), 8, 0.3, 0.3, 0.3, 0.1);
         } else {
-            // Standard spear attack and impact sounds
-            playSpearSound(vindicator, "ITEM_SPEAR_HIT", 1.0F, 1.0F);
-            playSpearSound(vindicator, "ITEM_SPEAR_ATTACK", 0.9F, 1.1F);
+            finalDamage *= 1.5;
+            playSpearSound(vindicator, "ITEM_SPEAR_LUNGE_1", 1.0F, 1.05F);
+            target.getWorld().spawnParticle(org.bukkit.Particle.CRIT, target.getLocation().add(0, 1, 0), 4, 0.2, 0.2, 0.2, 0.05);
         }
 
-        target.damage(damage, vindicator);
+        // Apply primary target damage
+        target.damage(finalDamage, vindicator);
+
+        // Spear Piercing/AOE Damage: Hits up to 3 additional secondary targets in a line
+        Location startLoc = vindicator.getLocation();
+        Vector direction = startLoc.getDirection().normalize();
+        double pierceRange = riding ? 6.0 : 5.2;
+
+        int piercedCount = 0;
+        for (org.bukkit.entity.Entity entity : target.getNearbyEntities(pierceRange, 3.0, pierceRange)) {
+            if (piercedCount >= 3) break;
+            if (entity == target || entity == vindicator || entity == vindicator.getVehicle()) continue;
+
+            if (entity instanceof LivingEntity) {
+                LivingEntity secondaryTarget = (LivingEntity) entity;
+
+                // Ensure we only target typical raid hostile targets
+                if (secondaryTarget instanceof Player || secondaryTarget instanceof org.bukkit.entity.IronGolem || secondaryTarget instanceof org.bukkit.entity.Villager) {
+                    // Vector projection check along charge line
+                    Vector toTarget = secondaryTarget.getLocation().toVector().subtract(startLoc.toVector());
+                    double projection = toTarget.dot(direction);
+
+                    if (projection > 0 && projection <= pierceRange) {
+                        Vector closestPoint = startLoc.toVector().add(direction.clone().multiply(projection));
+                        double distSq = secondaryTarget.getLocation().toVector().distanceSquared(closestPoint);
+
+                        if (distSq <= 2.25) { // Within 1.5 blocks of the linear attack path
+                            secondaryTarget.damage(finalDamage * 0.75, vindicator); // Pierced targets take 75% damage
+                            secondaryTarget.getWorld().spawnParticle(org.bukkit.Particle.SWEEP_ATTACK, secondaryTarget.getLocation().add(0, 1, 0), 1);
+                            piercedCount++;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private void moveTowardsTarget(LivingEntity entity, Location targetLoc, double speed) {
         try {
-            // Attempt standard Paper Pathfinder API (completely independent of version mappings)
-            java.lang.reflect.Method getPathfinderMethod = entity.getClass().getMethod("getPathfinder");
-            Object pathfinder = getPathfinderMethod.invoke(entity);
-            if (pathfinder != null) {
-                java.lang.reflect.Method moveToMethod = pathfinder.getClass().getMethod("moveTo", org.bukkit.Location.class, double.class);
-                moveToMethod.invoke(pathfinder, targetLoc, speed);
+            initReflection(entity, null);
+            if (getPathfinderMethod != null) {
+                Object pathfinder = getPathfinderMethod.invoke(entity);
+                if (pathfinder != null) {
+                    if (moveToPathfinderMethod == null) {
+                        moveToPathfinderMethod = pathfinder.getClass().getMethod("moveTo", org.bukkit.Location.class, double.class);
+                    }
+                    moveToPathfinderMethod.invoke(pathfinder, targetLoc, speed);
+                    return;
+                }
             }
-        } catch (Exception e) {
-            // Fallback: use native NMS navigation if Paper's pathfinder is absent or signature-modified
-            try {
-                java.lang.reflect.Method getHandleMethod = entity.getClass().getMethod("getHandle");
+        } catch (Exception ignored) {}
+
+        try {
+            // NMS Navigation Fallback
+            if (getHandleMethod != null) {
                 Object nmsEntity = getHandleMethod.invoke(entity);
-                java.lang.reflect.Method getNavigationMethod = nmsEntity.getClass().getMethod("getNavigation");
+                if (getNavigationMethod == null) {
+                    getNavigationMethod = nmsEntity.getClass().getMethod("getNavigation");
+                }
                 Object navigation = getNavigationMethod.invoke(nmsEntity);
                 if (navigation != null) {
-                    java.lang.reflect.Method moveToMethod = navigation.getClass().getMethod("moveTo", double.class, double.class, double.class, double.class);
-                    moveToMethod.invoke(navigation, targetLoc.getX(), targetLoc.getY(), targetLoc.getZ(), speed);
+                    if (moveToNavigationMethod == null) {
+                        moveToNavigationMethod = navigation.getClass().getMethod("moveTo", double.class, double.class, double.class, double.class);
+                    }
+                    moveToNavigationMethod.invoke(navigation, targetLoc.getX(), targetLoc.getY(), targetLoc.getZ(), speed);
                 }
-            } catch (Exception ex) {
-                // Ignore silently
             }
-        }
+        } catch (Exception ignored) {}
     }
 
     private void startUsingSpear(Vindicator vindicator) {
         try {
-            java.lang.reflect.Method getHandleMethod = vindicator.getClass().getMethod("getHandle");
+            initReflection(vindicator, null);
+            if (getHandleMethod == null) return;
             Object nmsVindicator = getHandleMethod.invoke(vindicator);
+            initReflection(vindicator, nmsVindicator);
 
-            java.lang.reflect.Method isUsingItemMethod = nmsVindicator.getClass().getMethod("isUsingItem");
-            boolean isUsing = (boolean) isUsingItemMethod.invoke(nmsVindicator);
-
-            if (!isUsing) {
-                Class<?> handClass = Class.forName("net.minecraft.world.InteractionHand");
-                Object mainHand = handClass.getField("MAIN_HAND").get(null);
-
-                java.lang.reflect.Method startUsingMethod = null;
-                for (java.lang.reflect.Method m : nmsVindicator.getClass().getMethods()) {
-                    if (m.getName().equals("startUsingItem") && m.getParameterCount() == 1 && m.getParameterTypes()[0] == handClass) {
-                        startUsingMethod = m;
-                        break;
-                    }
-                }
-                if (startUsingMethod != null) {
-                    startUsingMethod.invoke(nmsVindicator, mainHand);
+            if (isUsingItemMethod != null && startUsingItemMethod != null) {
+                boolean isUsing = (boolean) isUsingItemMethod.invoke(nmsVindicator);
+                if (!isUsing) {
+                    startUsingItemMethod.invoke(nmsVindicator, mainHandEnum);
 
                     // Play spear charge sound
                     playSpearSound(vindicator, "ITEM_SPEAR_USE", 1.0F, 1.0F);
 
-                    // Compensate for the 0.2x vanilla item-use speed penalty on foot
+                    // Smoothly offset 0.2x vanilla use penalty on foot (1.75 modifier is natural)
                     if (!vindicator.isInsideVehicle()) {
                         AttributeInstance speedAttribute = vindicator.getAttribute(Attribute.MOVEMENT_SPEED);
                         if (speedAttribute != null) {
-                            NamespacedKey key = new NamespacedKey(JavaPlugin.getPlugin(LargeRaids.class), "adjudicator_charge_speed");
-                            speedAttribute.removeModifier(key); // Clear any existing instance
+                            speedAttribute.removeModifier(speedKey); // Clear existing
                             AttributeModifier modifier = new AttributeModifier(
-                                    key, 3.5, AttributeModifier.Operation.ADD_NUMBER
+                                    speedKey, 1.75, AttributeModifier.Operation.ADD_NUMBER
                             );
                             speedAttribute.addModifier(modifier);
                         }
                     }
                 }
             }
-        } catch (Exception e) {
-            // Ignore silently
-        }
+        } catch (Exception ignored) {}
     }
 
     private void stopUsingSpear(Vindicator vindicator) {
         try {
-            java.lang.reflect.Method getHandleMethod = vindicator.getClass().getMethod("getHandle");
+            initReflection(vindicator, null);
+            if (getHandleMethod == null) return;
             Object nmsVindicator = getHandleMethod.invoke(vindicator);
+            initReflection(vindicator, nmsVindicator);
 
-            java.lang.reflect.Method isUsingItemMethod = nmsVindicator.getClass().getMethod("isUsingItem");
-            boolean isUsing = (boolean) isUsingItemMethod.invoke(nmsVindicator);
-
-            if (isUsing) {
-                java.lang.reflect.Method stopUsingMethod = nmsVindicator.getClass().getMethod("stopUsingItem");
-                stopUsingMethod.invoke(nmsVindicator);
+            if (isUsingItemMethod != null && stopUsingItemMethod != null) {
+                boolean isUsing = (boolean) isUsingItemMethod.invoke(nmsVindicator);
+                if (isUsing) {
+                    stopUsingItemMethod.invoke(nmsVindicator);
+                }
             }
-
-            // Always clean up the speed modifier when we lower the spear
+        } catch (Exception ignored) {
+        } finally {
+            // Always clean up speed modifier within finally block to avoid leaks
             AttributeInstance speedAttribute = vindicator.getAttribute(Attribute.MOVEMENT_SPEED);
             if (speedAttribute != null) {
-                NamespacedKey key = new NamespacedKey(JavaPlugin.getPlugin(LargeRaids.class), "adjudicator_charge_speed");
-                speedAttribute.removeModifier(key);
+                speedAttribute.removeModifier(speedKey);
             }
-        } catch (Exception e) {
-            // Ignore silently
         }
     }
 
-    // Helper method to safely retrieve and play spear sounds across SDK environments
+    private static void initReflection(Object entity, Object nmsVindicator) {
+        try {
+            if (getPathfinderMethod == null) {
+                try {
+                    getPathfinderMethod = entity.getClass().getMethod("getPathfinder");
+                } catch (NoSuchMethodException ignored) {}
+            }
+            if (getHandleMethod == null) {
+                getHandleMethod = entity.getClass().getMethod("getHandle");
+            }
+            if (nmsVindicator != null) {
+                Class<?> nmsClass = nmsVindicator.getClass();
+                if (isUsingItemMethod == null) {
+                    isUsingItemMethod = nmsClass.getMethod("isUsingItem");
+                }
+                if (stopUsingItemMethod == null) {
+                    stopUsingItemMethod = nmsClass.getMethod("stopUsingItem");
+                }
+                if (startUsingItemMethod == null) {
+                    Class<?> handClass = Class.forName("net.minecraft.world.InteractionHand");
+                    mainHandEnum = handClass.getField("MAIN_HAND").get(null);
+                    for (Method m : nmsClass.getMethods()) {
+                        if (m.getName().equals("startUsingItem") && m.getParameterCount() == 1 && m.getParameterTypes()[0] == handClass) {
+                            startUsingItemMethod = m;
+                            break;
+                        }
+                    }
+                }
+                if (goalSelectorField == null) {
+                    Class<?> currentClass = nmsClass;
+                    while (currentClass != null && goalSelectorField == null) {
+                        try {
+                            goalSelectorField = currentClass.getDeclaredField("goalSelector");
+                        } catch (NoSuchFieldException e) {
+                            currentClass = currentClass.getSuperclass();
+                        }
+                    }
+                    if (goalSelectorField != null) {
+                        goalSelectorField.setAccessible(true);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
     private void playSpearSound(org.bukkit.entity.Entity entity, String soundName, float volume, float pitch) {
         try {
-            // Translate enum style (e.g. ITEM_SPEAR_HIT) to minecraft path (minecraft:item.spear.hit)
             org.bukkit.NamespacedKey key = org.bukkit.NamespacedKey.minecraft(soundName.toLowerCase().replace('_', '.'));
-
-            // Resolve using the modern, non-deprecated Registry lookup
             org.bukkit.Sound sound = org.bukkit.Registry.SOUNDS.get(key);
             if (sound != null) {
                 entity.getWorld().playSound(entity.getLocation(), sound, volume, pitch);
             } else {
-                // Fallback to playing by direct resource key if the registry lacks the mapping
                 entity.getWorld().playSound(entity.getLocation(), "minecraft:" + key.getKey(), volume, pitch);
             }
         } catch (Exception e) {
-            // Robust secondary fallback in case of legacy API mismatches
             try {
                 String minecraftSoundName = "minecraft:" + soundName.toLowerCase().replace('_', '.');
                 entity.getWorld().playSound(entity.getLocation(), minecraftSoundName, volume, pitch);
@@ -292,7 +398,11 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
     }
 
     private boolean isAdjudicator(Vindicator vindicator) {
-        return vindicator.getPersistentDataContainer().has(getAdjudicatorNamespacedKey(), PersistentDataType.BYTE);
+        return vindicator.getPersistentDataContainer().has(adjudicatorKey, PersistentDataType.BYTE);
+    }
+
+    private boolean isAdjudicatorHorse(org.bukkit.entity.Entity entity) {
+        return entity instanceof Horse && entity.getPersistentDataContainer().has(adjudicatorKey, PersistentDataType.BYTE);
     }
 
     @Override
@@ -309,6 +419,13 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
     @Override
     public Adjudicator spawn(Location location) {
         Vindicator vindicator = (Vindicator) location.getWorld().spawnEntity(location, EntityType.VINDICATOR);
+
+        // Match standard Vindicator tracking distance
+        AttributeInstance followRange = vindicator.getAttribute(Attribute.FOLLOW_RANGE);
+        if (followRange != null) {
+            followRange.setBaseValue(32.0);
+        }
+
         vindicator.getAttribute(Attribute.MAX_HEALTH).setBaseValue(health);
         vindicator.setHealth(health);
 
@@ -324,10 +441,9 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
         }
 
         PersistentDataContainer pdc = vindicator.getPersistentDataContainer();
-        pdc.set(getAdjudicatorNamespacedKey(), PersistentDataType.BYTE, (byte) 0);
+        pdc.set(adjudicatorKey, PersistentDataType.BYTE, (byte) 0);
         vindicator.setCustomName("§6Adjudicator");
 
-        // Inject the spear charge attack behavior (SpearUseGoal)
         injectSpearUseGoal(vindicator);
 
         return new Adjudicator(vindicator);
@@ -338,7 +454,11 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
         horse.getAttribute(Attribute.MAX_HEALTH).setBaseValue(horseHealth);
         horse.setHealth(horseHealth);
 
-        // Equip both a Saddle and Iron Horse Armor
+        AttributeInstance speedAttribute = horse.getAttribute(Attribute.MOVEMENT_SPEED);
+        if (speedAttribute != null) {
+            speedAttribute.setBaseValue(0.42); // Slightly increased from 0.36
+        }
+
         horse.getInventory().setSaddle(new ItemStack(Material.SADDLE));
         horse.getInventory().setArmor(new ItemStack(Material.IRON_HORSE_ARMOR));
 
@@ -346,7 +466,17 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
         horse.setCustomName("§6Adjudicator's Steed");
         horse.setRemoveWhenFarAway(false);
 
+        // Tag the horse to identify it safely for friendly fire checks
+        horse.getPersistentDataContainer().set(adjudicatorKey, PersistentDataType.BYTE, (byte) 0);
+
         Vindicator vindicator = (Vindicator) location.getWorld().spawnEntity(location, EntityType.VINDICATOR);
+
+        // Match standard Vindicator tracking distance
+        AttributeInstance followRange = vindicator.getAttribute(Attribute.FOLLOW_RANGE);
+        if (followRange != null) {
+            followRange.setBaseValue(32.0);
+        }
+
         vindicator.getAttribute(Attribute.MAX_HEALTH).setBaseValue(health);
         vindicator.setHealth(health);
 
@@ -362,14 +492,12 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
         }
 
         PersistentDataContainer pdc = vindicator.getPersistentDataContainer();
-        pdc.set(getAdjudicatorNamespacedKey(), PersistentDataType.BYTE, (byte) 0);
-
-        pdc.set(getAdjudicatorHorseKey(), PersistentDataType.STRING, horse.getUniqueId().toString());
+        pdc.set(adjudicatorKey, PersistentDataType.BYTE, (byte) 0);
+        pdc.set(horseKey, PersistentDataType.STRING, horse.getUniqueId().toString());
         vindicator.setCustomName("§6Adjudicator");
 
         horse.addPassenger(vindicator);
 
-        // Inject the spear jousting goal (SpearUseGoal)
         injectSpearUseGoal(vindicator);
 
         return new AdjudicatorRider(vindicator, horse);
@@ -377,29 +505,20 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
 
     private void injectSpearUseGoal(Vindicator vindicator) {
         try {
-            java.lang.reflect.Method getHandleMethod = vindicator.getClass().getMethod("getHandle");
+            initReflection(vindicator, null);
+            if (getHandleMethod == null) return;
             Object nmsVindicator = getHandleMethod.invoke(vindicator);
-
-            java.lang.reflect.Field goalSelectorField = null;
-            Class<?> currentClass = nmsVindicator.getClass();
-            while (currentClass != null && goalSelectorField == null) {
-                try {
-                    goalSelectorField = currentClass.getDeclaredField("goalSelector");
-                } catch (NoSuchFieldException e) {
-                    currentClass = currentClass.getSuperclass();
-                }
-            }
+            initReflection(vindicator, nmsVindicator);
 
             if (goalSelectorField != null) {
-                goalSelectorField.setAccessible(true);
                 Object goalSelector = goalSelectorField.get(nmsVindicator);
 
                 removeMeleeAttackGoals(goalSelector);
 
                 Object spearGoal = createSpearUseGoal(nmsVindicator);
                 if (spearGoal != null) {
-                    java.lang.reflect.Method addGoalMethod = null;
-                    for (java.lang.reflect.Method m : goalSelector.getClass().getMethods()) {
+                    Method addGoalMethod = null;
+                    for (Method m : goalSelector.getClass().getMethods()) {
                         if (m.getName().equals("addGoal") && m.getParameterCount() == 2) {
                             addGoalMethod = m;
                             break;
@@ -411,29 +530,34 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                 }
             }
         } catch (Exception e) {
-            JavaPlugin.getPlugin(LargeRaids.class).getLogger().warning("Failed to inject SpearUseGoal into Adjudicator: " + e.getMessage());
+            plugin.getLogger().warning("Failed to inject SpearUseGoal into Adjudicator: " + e.getMessage());
         }
     }
 
     private void removeMeleeAttackGoals(Object goalSelector) {
         try {
-            java.lang.reflect.Field availableGoalsField = null;
-            Class<?> selectorClass = goalSelector.getClass();
-            while (selectorClass != null && availableGoalsField == null) {
-                try {
-                    availableGoalsField = selectorClass.getDeclaredField("availableGoals");
-                } catch (NoSuchFieldException e) {
-                    selectorClass = selectorClass.getSuperclass();
+            if (availableGoalsField == null) {
+                Class<?> selectorClass = goalSelector.getClass();
+                while (selectorClass != null && availableGoalsField == null) {
+                    try {
+                        availableGoalsField = selectorClass.getDeclaredField("availableGoals");
+                    } catch (NoSuchFieldException e) {
+                        selectorClass = selectorClass.getSuperclass();
+                    }
+                }
+                if (availableGoalsField != null) {
+                    availableGoalsField.setAccessible(true);
                 }
             }
 
             if (availableGoalsField != null) {
-                availableGoalsField.setAccessible(true);
-                java.util.Set<?> availableGoals = (java.util.Set<?>) availableGoalsField.get(goalSelector);
+                Set<?> availableGoals = (Set<?>) availableGoalsField.get(goalSelector);
 
-                java.util.List<Object> toRemove = new java.util.ArrayList<>();
+                List<Object> toRemove = new ArrayList<>();
                 for (Object prioritizedGoal : availableGoals) {
-                    java.lang.reflect.Method getGoalMethod = prioritizedGoal.getClass().getMethod("getGoal");
+                    if (getGoalMethod == null) {
+                        getGoalMethod = prioritizedGoal.getClass().getMethod("getGoal");
+                    }
                     Object underlyingGoal = getGoalMethod.invoke(prioritizedGoal);
                     String className = underlyingGoal.getClass().getName();
 
@@ -442,13 +566,15 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                     }
                 }
 
-                java.lang.reflect.Method removeGoalMethod = goalSelector.getClass().getMethod("removeGoal", Class.forName("net.minecraft.world.entity.ai.goal.Goal"));
+                if (removeGoalMethod == null) {
+                    removeGoalMethod = goalSelector.getClass().getMethod("removeGoal", Class.forName("net.minecraft.world.entity.ai.goal.Goal"));
+                }
                 for (Object goal : toRemove) {
                     removeGoalMethod.invoke(goalSelector, goal);
                 }
             }
         } catch (Exception e) {
-            JavaPlugin.getPlugin(LargeRaids.class).getLogger().warning("Failed to remove native MeleeAttackGoals: " + e.getMessage());
+            plugin.getLogger().warning("Failed to remove native MeleeAttackGoals: " + e.getMessage());
         }
     }
 
@@ -466,7 +592,8 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                     } else if (params.length == 2 && params[1] == double.class) {
                         return ctor.newInstance(nmsVindicator, 1.25);
                     } else if (params.length == 4 && params[1] == double.class && params[2] == int.class && (params[3] == float.class || params[3] == double.class)) {
-                        Object radius = params[3] == float.class ? 15.0F : 15.0;
+                        // Increase search range radius parameter to 32.0 to expand search/attack range bounds
+                        Object radius = params[3] == float.class ? 32.0F : 32.0;
                         return ctor.newInstance(nmsVindicator, 1.25, 20, radius);
                     } else {
                         Object[] args = new Object[params.length];
@@ -475,7 +602,7 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                             if (params[i] == double.class) {
                                 args[i] = 1.25;
                             } else if (params[i] == float.class) {
-                                args[i] = 15.0F;
+                                args[i] = 32.0F; // Expanded search/attack range bounds
                             } else if (params[i] == int.class) {
                                 args[i] = 20;
                             } else if (params[i] == boolean.class) {
@@ -489,7 +616,7 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                 }
             }
         } catch (Exception e) {
-            JavaPlugin.getPlugin(LargeRaids.class).getLogger().warning("Could not dynamically load SpearUseGoal: " + e.getMessage());
+            plugin.getLogger().warning("Could not dynamically load SpearUseGoal: " + e.getMessage());
         }
         return null;
     }
@@ -501,15 +628,14 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
 
         Vindicator vindicator = (Vindicator) evt.getEntity();
         PersistentDataContainer pdc = vindicator.getPersistentDataContainer();
-        NamespacedKey horseKey = getAdjudicatorHorseKey();
 
         if (pdc.has(horseKey, PersistentDataType.STRING)) {
             String uuidStr = pdc.get(horseKey, PersistentDataType.STRING);
             if (uuidStr != null) {
                 try {
-                    java.util.UUID horseUuid = java.util.UUID.fromString(uuidStr);
+                    UUID horseUuid = UUID.fromString(uuidStr);
                     org.bukkit.entity.Entity horse = getEntityByUUID(vindicator.getWorld(), horseUuid);
-                    if (horse != null && !horse.isDead()) {
+                    if (horse != null && !horse.isDead() && horse.isValid()) {
                         evt.setCancelled(true);
                     }
                 } catch (IllegalArgumentException e) {
@@ -519,15 +645,46 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
         }
     }
 
-    // Helper method to safely retrieve entities across dimensions
-    private org.bukkit.entity.Entity getEntityByUUID(org.bukkit.World world, java.util.UUID uuid) {
+    @EventHandler
+    private void onHorseDamage(EntityDamageByEntityEvent evt) {
+        if (!(evt.getEntity() instanceof Horse)) {
+            return;
+        }
+
+        Horse horse = (Horse) evt.getEntity();
+        if (!isAdjudicatorHorse(horse)) {
+            return;
+        }
+
+        org.bukkit.entity.Entity damager = evt.getDamager();
+
+        // Resolve shooter if damage is dealt by a projectile (arrows, splash potions, etc.)
+        if (damager instanceof Projectile) {
+            ProjectileSource source = ((Projectile) damager).getShooter();
+            if (source instanceof org.bukkit.entity.Entity) {
+                damager = (org.bukkit.entity.Entity) source;
+            }
+        }
+
+        // Resolve summoner if damage is dealt by Evoker Fangs
+        if (damager instanceof EvokerFangs) {
+            damager = ((EvokerFangs) damager).getOwner();
+        }
+
+        // Cancel damage if it originated from a Raider or a Witch
+        if (damager instanceof Raider || damager instanceof Witch) {
+            evt.setCancelled(true);
+        }
+    }
+
+    private org.bukkit.entity.Entity getEntityByUUID(org.bukkit.World world, UUID uuid) {
         if (world != null) {
             org.bukkit.entity.Entity entity = world.getEntity(uuid);
             if (entity != null) {
                 return entity;
             }
         }
-        return org.bukkit.Bukkit.getEntity(uuid);
+        return Bukkit.getEntity(uuid);
     }
 
     private ItemStack getAdjudicatorBanner() {
@@ -565,13 +722,5 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
             shield.setItemMeta(meta);
         }
         return shield;
-    }
-
-    private NamespacedKey getAdjudicatorNamespacedKey() {
-        return new NamespacedKey(JavaPlugin.getPlugin(LargeRaids.class), "adjudicator");
-    }
-
-    private NamespacedKey getAdjudicatorHorseKey() {
-        return new NamespacedKey(JavaPlugin.getPlugin(LargeRaids.class), "adjudicator_horse_uuid");
     }
 }
