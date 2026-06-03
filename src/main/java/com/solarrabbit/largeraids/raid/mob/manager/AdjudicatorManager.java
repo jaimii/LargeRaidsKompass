@@ -146,8 +146,8 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                     ? (LivingEntity) vindicator.getVehicle()
                     : vindicator;
 
-            // Adjusted speed multiplier for horse riders (1.45 vs 1.25 on foot)
-            double chargeSpeedMultiplier = riding ? 1.45 : 1.25;
+            // Adjusted speed multiplier for horse riders (1.45 vs 1.12 on foot)
+            double chargeSpeedMultiplier = riding ? 1.45 : 0.80;
             moveTowardsTarget(activeMover, target.getLocation(), chargeSpeedMultiplier);
 
             if (distanceSq > maxReachSq) {
