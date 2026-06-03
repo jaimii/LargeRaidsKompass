@@ -30,6 +30,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityDismountEvent;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
@@ -91,6 +92,22 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                 for (Vindicator vindicator : world.getEntitiesByClass(Vindicator.class)) {
                     if (vindicator.isDead() || !vindicator.isValid()) continue;
                     if (isAdjudicator(vindicator)) {
+                        // Hard fail-safe remount check
+                        PersistentDataContainer pdc = vindicator.getPersistentDataContainer();
+                        if (pdc.has(horseKey, PersistentDataType.STRING)) {
+                            if (!vindicator.isInsideVehicle()) {
+                                String uuidStr = pdc.get(horseKey, PersistentDataType.STRING);
+                                if (uuidStr != null) {
+                                    try {
+                                        UUID horseUuid = UUID.fromString(uuidStr);
+                                        org.bukkit.entity.Entity horse = getEntityByUUID(vindicator.getWorld(), horseUuid);
+                                        if (horse instanceof Horse && !horse.isDead() && horse.isValid()) {
+                                            horse.addPassenger(vindicator);
+                                        }
+                                    } catch (IllegalArgumentException ignored) {}
+                                }
+                            }
+                        }
                         handleAdjudicatorAttack(vindicator);
                     }
                 }
@@ -147,7 +164,7 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                     : vindicator;
 
             // Adjusted speed multiplier for horse riders (1.45 vs 1.12 on foot)
-            double chargeSpeedMultiplier = riding ? 1.45 : 0.80;
+            double chargeSpeedMultiplier = riding ? 1.45 : 0.60;
             moveTowardsTarget(activeMover, target.getLocation(), chargeSpeedMultiplier);
 
             if (distanceSq > maxReachSq) {
@@ -674,6 +691,43 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
         // Cancel damage if it originated from a Raider or a Witch
         if (damager instanceof Raider || damager instanceof Witch) {
             evt.setCancelled(true);
+        }
+    }
+
+    @EventHandler
+    private void onEntityDismount(EntityDismountEvent evt) {
+        if (!(evt.getEntity() instanceof Vindicator)) {
+            return;
+        }
+
+        Vindicator vindicator = (Vindicator) evt.getEntity();
+        if (!isAdjudicator(vindicator)) {
+            return;
+        }
+
+        org.bukkit.entity.Entity dismounted = evt.getDismounted();
+        if (!(dismounted instanceof Horse) || !isAdjudicatorHorse(dismounted)) {
+            return;
+        }
+
+        PersistentDataContainer pdc = vindicator.getPersistentDataContainer();
+        if (pdc.has(horseKey, PersistentDataType.STRING)) {
+            String uuidStr = pdc.get(horseKey, PersistentDataType.STRING);
+            if (uuidStr != null && uuidStr.equals(dismounted.getUniqueId().toString())) {
+                // Keep the rider on the horse if both are alive and valid
+                if (vindicator.isValid() && !vindicator.isDead() && dismounted.isValid() && !dismounted.isDead()) {
+                    if (evt.isCancellable()) {
+                        evt.setCancelled(true);
+                    } else {
+                        // Fallback: If the event isn't cancellable, remount them on the next tick
+                        Bukkit.getScheduler().runTask(plugin, () -> {
+                            if (vindicator.isValid() && !vindicator.isDead() && dismounted.isValid() && !dismounted.isDead()) {
+                                dismounted.addPassenger(vindicator);
+                            }
+                        });
+                    }
+                }
+            }
         }
     }
 
