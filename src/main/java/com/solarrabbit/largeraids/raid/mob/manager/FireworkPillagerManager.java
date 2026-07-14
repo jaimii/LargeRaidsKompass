@@ -22,6 +22,7 @@ import org.bukkit.entity.Raider;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EntityShootBowEvent;
 import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
 import org.bukkit.inventory.EntityEquipment;
@@ -46,13 +47,17 @@ public class FireworkPillagerManager implements CustomRaiderManager, Listener {
         Pillager entity = (Pillager) location.getWorld().spawnEntity(location, EntityType.PILLAGER);
         entity.getAttribute(Attribute.MAX_HEALTH).setBaseValue(health);
         entity.setHealth(health);
+
         EntityEquipment equipment = entity.getEquipment();
         equipment.setItemInOffHand(getDefaultFirework());
         equipment.setHelmet(getDefaultBanner());
         equipment.setHelmetDropChance(1.0f);
+
+        entity.setPatrolLeader(true);
+
         PersistentDataContainer pdc = entity.getPersistentDataContainer();
         pdc.set(getPillagerNamespacedKey(), PersistentDataType.BYTE, (byte) 0);
-        entity.setCustomName("§eArtillery Pillager");
+        entity.setCustomName("§eEnforcer");
         return new FireworkPillager(entity);
     }
 
@@ -81,6 +86,26 @@ public class FireworkPillagerManager implements CustomRaiderManager, Listener {
             evt.setCancelled(true);
     }
 
+    @EventHandler
+    private void onDeath(EntityDeathEvent evt) {
+        if (evt.getEntityType() != EntityType.PILLAGER)
+            return;
+        Pillager pillager = (Pillager) evt.getEntity();
+        if (isFireworkPillager(pillager)) {
+            evt.setDroppedExp(getXpForLevel(5));
+        }
+    }
+
+    private int getXpForLevel(int level) {
+        if (level <= 16) {
+            return level * level + 6 * level;
+        } else if (level <= 31) {
+            return (int) (2.5 * level * level - 40.5 * level + 360);
+        } else {
+            return (int) (4.5 * level * level - 162.5 * level + 2220);
+        }
+    }
+
     private ItemStack getDefaultFirework() {
         ItemStack firework = new ItemStack(Material.FIREWORK_ROCKET);
         FireworkMeta meta = (FireworkMeta) firework.getItemMeta();
@@ -101,7 +126,7 @@ public class FireworkPillagerManager implements CustomRaiderManager, Listener {
         meta.addPattern(new Pattern(DyeColor.YELLOW, PatternType.FLOWER));
         meta.addPattern(new Pattern(DyeColor.BLACK, PatternType.BORDER));
         meta.addItemFlags(ItemFlag.HIDE_ADDITIONAL_TOOLTIP);
-        meta.setDisplayName(ChatColor.GOLD.toString() + ChatColor.ITALIC + "Artillery Pillager Banner");
+        meta.setDisplayName(ChatColor.GOLD.toString() + ChatColor.ITALIC + "Enforcer Banner");
         banner.setItemMeta(meta);
         return banner;
     }
@@ -123,5 +148,4 @@ public class FireworkPillagerManager implements CustomRaiderManager, Listener {
     private NamespacedKey getFireworkNamespacedKey() {
         return new NamespacedKey(JavaPlugin.getPlugin(LargeRaids.class), "pillager_firework");
     }
-
 }

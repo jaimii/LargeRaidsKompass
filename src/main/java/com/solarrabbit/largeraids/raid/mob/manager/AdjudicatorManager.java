@@ -30,6 +30,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EntityDismountEvent;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.ItemFlag;
@@ -58,6 +59,10 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
     private final NamespacedKey adjudicatorKey;
     private final NamespacedKey horseKey;
     private final NamespacedKey speedKey;
+
+    // Direct tracking collections to prevent global entity scans
+    private final Set<Vindicator> activeAdjudicators = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final WeakHashMap<Vindicator, Boolean> lineOfSightCache = new WeakHashMap<>();
 
     private final WeakHashMap<Vindicator, Long> attackCooldowns = new WeakHashMap<>();
     private final WeakHashMap<Vindicator, Boolean> hasHitInCurrentCycle = new WeakHashMap<>();
@@ -88,31 +93,38 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
     private void startTickTask() {
         // Runs a lightweight proximity check task every 2 ticks (10 times a second)
         Bukkit.getScheduler().runTaskTimer(plugin, () -> {
+            activeAdjudicators.removeIf(v -> v == null || v.isDead() || !v.isValid());
+            for (Vindicator vindicator : activeAdjudicators) {
+                // Hard fail-safe remount check
+                PersistentDataContainer pdc = vindicator.getPersistentDataContainer();
+                if (pdc.has(horseKey, PersistentDataType.STRING)) {
+                    if (!vindicator.isInsideVehicle()) {
+                        String uuidStr = pdc.get(horseKey, PersistentDataType.STRING);
+                        if (uuidStr != null) {
+                            try {
+                                UUID horseUuid = UUID.fromString(uuidStr);
+                                org.bukkit.entity.Entity horse = getEntityByUUID(vindicator.getWorld(), horseUuid);
+                                if (horse instanceof Horse && !horse.isDead() && horse.isValid()) {
+                                    horse.addPassenger(vindicator);
+                                }
+                            } catch (IllegalArgumentException ignored) {}
+                        }
+                    }
+                }
+                handleAdjudicatorAttack(vindicator);
+            }
+        }, 0, 2);
+
+        // Low-frequency registration sweep (every 5 seconds) to catch existing entities on chunk-load or restarts
+        Bukkit.getScheduler().runTaskTimer(plugin, () -> {
             for (org.bukkit.World world : Bukkit.getWorlds()) {
                 for (Vindicator vindicator : world.getEntitiesByClass(Vindicator.class)) {
-                    if (vindicator.isDead() || !vindicator.isValid()) continue;
                     if (isAdjudicator(vindicator)) {
-                        // Hard fail-safe remount check
-                        PersistentDataContainer pdc = vindicator.getPersistentDataContainer();
-                        if (pdc.has(horseKey, PersistentDataType.STRING)) {
-                            if (!vindicator.isInsideVehicle()) {
-                                String uuidStr = pdc.get(horseKey, PersistentDataType.STRING);
-                                if (uuidStr != null) {
-                                    try {
-                                        UUID horseUuid = UUID.fromString(uuidStr);
-                                        org.bukkit.entity.Entity horse = getEntityByUUID(vindicator.getWorld(), horseUuid);
-                                        if (horse instanceof Horse && !horse.isDead() && horse.isValid()) {
-                                            horse.addPassenger(vindicator);
-                                        }
-                                    } catch (IllegalArgumentException ignored) {}
-                                }
-                            }
-                        }
-                        handleAdjudicatorAttack(vindicator);
+                        activeAdjudicators.add(vindicator);
                     }
                 }
             }
-        }, 0, 2);
+        }, 100, 100);
     }
 
     private void handleAdjudicatorAttack(Vindicator vindicator) {
@@ -133,8 +145,16 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
             }
         }
 
-        // Prevent attacking through solid walls
-        if (!vindicator.hasLineOfSight(target)) {
+        // Prevent attacking through solid walls (Throttled checking to once every 4 ticks lived)
+        boolean hasLos;
+        if (vindicator.getTicksLived() % 4 == 0) {
+            hasLos = vindicator.hasLineOfSight(target);
+            lineOfSightCache.put(vindicator, hasLos);
+        } else {
+            hasLos = lineOfSightCache.getOrDefault(vindicator, true);
+        }
+
+        if (!hasLos) {
             stopUsingSpear(vindicator);
             return;
         }
@@ -163,7 +183,7 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                     ? (LivingEntity) vindicator.getVehicle()
                     : vindicator;
 
-            // Adjusted speed multiplier
+            // Adjusted speed multiplier for horse riders (1.45 vs 1.12 on foot)
             double chargeSpeedMultiplier = riding ? 1.45 : 1.12;
             moveTowardsTarget(activeMover, target.getLocation(), chargeSpeedMultiplier);
 
@@ -201,7 +221,7 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                     : vindicator;
 
             // Active manual retreat pathing
-            double retreatSpeedMultiplier = riding ? 1.40 : 0.60;
+            double retreatSpeedMultiplier = riding ? 1.55 : 0.60;
             moveTowardsTarget(activeMover, retreatLoc, retreatSpeedMultiplier);
         }
     }
@@ -313,7 +333,7 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
                     // Play spear charge sound
                     playSpearSound(vindicator, "ITEM_SPEAR_USE", 1.0F, 1.0F);
 
-                    // Smoothly offset use penalty on foot
+                    // Smoothly offset 0.2x vanilla use penalty on foot
                     if (!vindicator.isInsideVehicle()) {
                         AttributeInstance speedAttribute = vindicator.getAttribute(Attribute.MOVEMENT_SPEED);
                         if (speedAttribute != null) {
@@ -457,9 +477,14 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
             equipment.setHelmetDropChance(1.0f);
         }
 
+        // Apply Patrol Leader flag so client displays the helmet banner
+        vindicator.setPatrolLeader(true);
+
         PersistentDataContainer pdc = vindicator.getPersistentDataContainer();
         pdc.set(adjudicatorKey, PersistentDataType.BYTE, (byte) 0);
         vindicator.setCustomName("§6Adjudicator");
+
+        activeAdjudicators.add(vindicator);
 
         injectSpearUseGoal(vindicator);
 
@@ -508,16 +533,41 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
             equipment.setHelmetDropChance(1.0f);
         }
 
+        // Apply Patrol Leader flag so client displays the helmet banner
+        vindicator.setPatrolLeader(true);
+
         PersistentDataContainer pdc = vindicator.getPersistentDataContainer();
         pdc.set(adjudicatorKey, PersistentDataType.BYTE, (byte) 0);
         pdc.set(horseKey, PersistentDataType.STRING, horse.getUniqueId().toString());
         vindicator.setCustomName("§6Adjudicator");
+
+        activeAdjudicators.add(vindicator);
 
         horse.addPassenger(vindicator);
 
         injectSpearUseGoal(vindicator);
 
         return new AdjudicatorRider(vindicator, horse);
+    }
+
+    @EventHandler
+    private void onDeath(EntityDeathEvent evt) {
+        if (evt.getEntityType() != EntityType.VINDICATOR)
+            return;
+        Vindicator vindicator = (Vindicator) evt.getEntity();
+        if (isAdjudicator(vindicator)) {
+            evt.setDroppedExp(getXpForLevel(20));
+        }
+    }
+
+    private int getXpForLevel(int level) {
+        if (level <= 16) {
+            return level * level + 6 * level;
+        } else if (level <= 31) {
+            return (int) (2.5 * level * level - 40.5 * level + 360);
+        } else {
+            return (int) (4.5 * level * level - 162.5 * level + 2220);
+        }
     }
 
     private void injectSpearUseGoal(Vindicator vindicator) {

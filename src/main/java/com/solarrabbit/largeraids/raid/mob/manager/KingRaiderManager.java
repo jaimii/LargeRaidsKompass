@@ -37,6 +37,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EntitySpawnEvent;
 import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.ItemFlag;
@@ -99,6 +100,9 @@ public class KingRaiderManager implements BossRaiderManager, Listener {
         EntityEquipment equipment = rider.getEquipment();
         equipment.setHelmet(getDefaultBanner());
         equipment.setHelmetDropChance(1.0f);
+
+        rider.setPatrolLeader(true);
+
         rider.getPersistentDataContainer().set(getKingNamespacedKey(), PersistentDataType.BYTE, (byte) 0);
         rider.setCustomName("§cRaid §5Captain");
 
@@ -315,6 +319,31 @@ public class KingRaiderManager implements BossRaiderManager, Listener {
         Entity vehicle = king.getVehicle();
         if (isKing(king) && vehicle instanceof Ravager && isJuggernaut((Ravager) vehicle))
             evt.setCancelled(true);
+    }
+
+    @EventHandler
+    private void onDeath(EntityDeathEvent evt) {
+        if (evt.getEntityType() == EntityType.EVOKER) {
+            Spellcaster evoker = (Spellcaster) evt.getEntity();
+            if (isKing(evoker)) {
+                evt.setDroppedExp(getXpForLevel(50));
+            }
+        } else if (evt.getEntityType() == EntityType.RAVAGER) {
+            Ravager ravager = (Ravager) evt.getEntity();
+            if (isJuggernaut(ravager)) {
+                evt.setDroppedExp(getXpForLevel(100));
+            }
+        }
+    }
+
+    private int getXpForLevel(int level) {
+        if (level <= 16) {
+            return level * level + 6 * level;
+        } else if (level <= 31) {
+            return (int) (2.5 * level * level - 40.5 * level + 360);
+        } else {
+            return (int) (4.5 * level * level - 162.5 * level + 2220);
+        }
     }
 
     private ItemStack getDefaultBanner() {

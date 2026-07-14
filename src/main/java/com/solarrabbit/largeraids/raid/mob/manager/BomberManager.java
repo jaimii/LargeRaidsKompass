@@ -23,6 +23,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.entity.EntitySpawnEvent;
 import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
@@ -54,6 +55,9 @@ public class BomberManager implements CustomRaiderManager, Listener {
         EntityEquipment equipment = evoker.getEquipment();
         equipment.setHelmet(getDefaultBanner());
         equipment.setHelmetDropChance(1.0f);
+
+        evoker.setPatrolLeader(true);
+
         evoker.getPersistentDataContainer().set(getBomberNamespacedKey(), PersistentDataType.BYTE, (byte) 0);
         evoker.setCustomName("§cRampart");
         return new Bomber(evoker);
@@ -133,6 +137,26 @@ public class BomberManager implements CustomRaiderManager, Listener {
         evt.setCancelled(true);
     }
 
+    @EventHandler
+    private void onDeath(EntityDeathEvent evt) {
+        if (evt.getEntityType() != EntityType.EVOKER)
+            return;
+        Spellcaster evoker = (Spellcaster) evt.getEntity();
+        if (isBomber(evoker)) {
+            evt.setDroppedExp(getXpForLevel(15));
+        }
+    }
+
+    private int getXpForLevel(int level) {
+        if (level <= 16) {
+            return level * level + 6 * level;
+        } else if (level <= 31) {
+            return (int) (2.5 * level * level - 40.5 * level + 360);
+        } else {
+            return (int) (4.5 * level * level - 162.5 * level + 2220);
+        }
+    }
+
     private ItemStack getDefaultBanner() {
         ItemStack banner = new ItemStack(Material.LIGHT_GRAY_BANNER);
         BannerMeta meta = (BannerMeta) banner.getItemMeta();
@@ -175,5 +199,4 @@ public class BomberManager implements CustomRaiderManager, Listener {
     private NamespacedKey getTNTNamespacedKey() {
         return new NamespacedKey(JavaPlugin.getPlugin(LargeRaids.class), "bomber_vex_tnt");
     }
-
 }

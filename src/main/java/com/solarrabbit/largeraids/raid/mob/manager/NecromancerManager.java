@@ -30,6 +30,7 @@ import org.bukkit.event.block.BlockIgniteEvent.IgniteCause;
 import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityCombustByEntityEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EntitySpawnEvent;
 import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
 import org.bukkit.inventory.EntityEquipment;
@@ -52,6 +53,9 @@ public class NecromancerManager implements CustomRaiderManager, Listener {
         EntityEquipment equipment = evoker.getEquipment();
         equipment.setHelmet(getDefaultBanner());
         equipment.setHelmetDropChance(1.0f);
+
+        evoker.setPatrolLeader(true);
+
         evoker.getPersistentDataContainer().set(getNecromancerNamespacedKey(), PersistentDataType.BYTE, (byte) 0);
         evoker.setCustomName("Necromancer");
         return new Necromancer(evoker);
@@ -146,6 +150,26 @@ public class NecromancerManager implements CustomRaiderManager, Listener {
         }
     }
 
+    @EventHandler
+    private void onDeath(EntityDeathEvent evt) {
+        if (evt.getEntityType() != EntityType.EVOKER)
+            return;
+        Spellcaster evoker = (Spellcaster) evt.getEntity();
+        if (isNecromancer(evoker)) {
+            evt.setDroppedExp(getXpForLevel(25));
+        }
+    }
+
+    private int getXpForLevel(int level) {
+        if (level <= 16) {
+            return level * level + 6 * level;
+        } else if (level <= 31) {
+            return (int) (2.5 * level * level - 40.5 * level + 360);
+        } else {
+            return (int) (4.5 * level * level - 162.5 * level + 2220);
+        }
+    }
+
     private ItemStack getDefaultBanner() {
         ItemStack banner = new ItemStack(Material.GRAY_BANNER);
         BannerMeta meta = (BannerMeta) banner.getItemMeta();
@@ -191,5 +215,4 @@ public class NecromancerManager implements CustomRaiderManager, Listener {
     private NamespacedKey getNecromancerLightningNamespacedKey() {
         return new NamespacedKey(JavaPlugin.getPlugin(LargeRaids.class), "necromancer_lightning");
     }
-
 }
