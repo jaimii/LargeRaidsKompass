@@ -1,14 +1,17 @@
 package com.solarrabbit.largeraids.database;
 
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
 import com.solarrabbit.largeraids.LargeRaids;
 import com.solarrabbit.largeraids.PluginLogger.Level;
+
 import org.bukkit.Location;
 
 public class DatabaseAdapter {
     private final LargeRaids plugin;
     private final Database db;
-    private Map<String, Location> map;
+    private final Map<String, Location> map = new ConcurrentHashMap<>();
 
     public DatabaseAdapter(LargeRaids plugin) {
         this.plugin = plugin;
@@ -22,7 +25,7 @@ public class DatabaseAdapter {
     public void addCentre(Location location, String name) {
         this.map.put(name, location);
         this.db.addCentre(location, name).exceptionally(ex -> {
-            this.plugin.log("village-centers.database.add-fail", Level.WARN);
+            this.plugin.log(this.plugin.getMessage("village-centers.database.add-fail"), Level.WARN);
             ex.printStackTrace();
             return null;
         });
@@ -42,12 +45,16 @@ public class DatabaseAdapter {
     }
 
     public void load() {
-        this.db.load();
         this.plugin.log("Loading artificial villages centers...", Level.INFO);
-        this.db.getCentres().thenAccept(m -> this.map = m)
-                .thenRun(() -> this.plugin.log("Loaded artificial villages centers.", Level.SUCCESS))
+        this.db.getCentres().thenAccept(m -> {
+                    this.map.clear();
+                    if (m != null) {
+                        this.map.putAll(m);
+                    }
+                }).thenRun(() -> this.plugin.log("Loaded artificial villages centers.", Level.SUCCESS))
                 .exceptionally(e -> {
                     this.plugin.log("Unable to access database!", Level.FAIL);
+                    e.printStackTrace();
                     return null;
                 });
     }

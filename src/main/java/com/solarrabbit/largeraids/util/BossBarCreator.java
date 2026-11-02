@@ -1,6 +1,10 @@
 package com.solarrabbit.largeraids.util;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -11,7 +15,9 @@ import com.solarrabbit.largeraids.raid.LargeRaid;
 import com.solarrabbit.largeraids.raid.RaidManager;
 
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.boss.BarColor;
 import org.bukkit.boss.BarFlag;
 import org.bukkit.boss.BarStyle;
@@ -27,6 +33,8 @@ import org.bukkit.plugin.java.JavaPlugin;
 public class BossBarCreator implements Listener {
     private static final Map<Raider, BossBar> RAID_BOSSES = new HashMap<>();
     private static final int TICK_PERIOD = 10;
+    private static final double FALLBACK_RADIUS_SQ = 144.0 * 144.0;
+
     private final RaidManager raidManager;
 
     public BossBarCreator(RaidManager manager) {
@@ -34,17 +42,45 @@ public class BossBarCreator implements Listener {
     }
 
     public static BossBar createRaidBossBar(Raider boss) {
-        BossBar bar = Bukkit.createBossBar(boss.getName(), BarColor.RED, BarStyle.SEGMENTED_10, BarFlag.DARKEN_SKY);
+        return createRaidBossBar(boss, BarColor.RED);
+    }
+
+    public static BossBar createRaidBossBar(Raider boss, BarColor color) {
+        BossBar existing = RAID_BOSSES.get(boss);
+        if (existing != null) {
+            existing.setColor(color);
+            return existing;
+        }
+        BossBar bar = Bukkit.createBossBar(boss.getName(), color, BarStyle.SEGMENTED_10, BarFlag.DARKEN_SKY);
         registerEntity(boss, bar);
         return bar;
+    }
+
+    public static void ensureRaidBossBar(Raider boss) {
+        ensureRaidBossBar(boss, BarColor.RED);
+    }
+
+    public static void ensureRaidBossBar(Raider boss, BarColor color) {
+        if (!RAID_BOSSES.containsKey(boss)) {
+            createRaidBossBar(boss, color);
+        }
+    }
+
+    public void clearAllBars() {
+        for (BossBar bar : RAID_BOSSES.values()) {
+            if (bar != null) {
+                bar.removeAll();
+            }
+        }
+        RAID_BOSSES.clear();
     }
 
     @EventHandler
     private void onBossDeath(EntityDeathEvent evt) {
         Entity entity = evt.getEntity();
-        if (!(entity instanceof Raider))
+        if (!(entity instanceof Raider raider))
             return;
-        unregisterEntity((Raider) evt.getEntity());
+        unregisterEntity(raider);
     }
 
     public void init(JavaPlugin plugin) {
@@ -52,48 +88,73 @@ public class BossBarCreator implements Listener {
     }
 
     private void tick() {
+        if (RAID_BOSSES.isEmpty())
+            return;
+
+        Map<LargeRaid, Set<Player>> raidPlayersCache = new HashMap<>();
         Raider[] bosses = RAID_BOSSES.keySet().toArray(Raider[]::new);
+
         for (Raider boss : bosses) {
+            if (boss == null || boss.isDead() || !boss.isValid()) {
+                unregisterEntity(boss);
+                continue;
+            }
             updateBossBarProgress(boss);
-            updateBossBarVisibility(boss);
+            updateBossBarVisibility(boss, raidPlayersCache);
         }
     }
 
     private void updateBossBarProgress(Raider boss) {
         BossBar bar = RAID_BOSSES.get(boss);
-        double progress = boss.getHealth() / boss.getAttribute(Attribute.MAX_HEALTH).getValue();
-        progress = Math.min(1, Math.max(0, progress));
-        bar.setProgress(progress);
+        if (bar == null) return;
+
+        AttributeInstance maxHealthAttr = boss.getAttribute(Attribute.MAX_HEALTH);
+        double maxHealth = maxHealthAttr != null ? maxHealthAttr.getValue() : 20.0;
+        double progress = boss.getHealth() / maxHealth;
+        progress = Math.min(1.0, Math.max(0.0, progress));
+
+        if (Math.abs(bar.getProgress() - progress) > 1e-4) {
+            bar.setProgress(progress);
+        }
     }
 
-    private void updateBossBarVisibility(Raider boss) {
+    private void updateBossBarVisibility(Raider boss, Map<LargeRaid, Set<Player>> raidPlayersCache) {
         BossBar bar = RAID_BOSSES.get(boss);
-        bar.removeAll();
+        if (bar == null) return;
 
-        if (boss.isDead()) {
-            unregisterEntity(boss);
-            return;
-        }
-
+        Set<Player> targetPlayers;
         AbstractRaidWrapper nmsRaid = VersionUtil.getCraftRaiderWrapper(boss).getHandle().getCurrentRaid();
+
         if (nmsRaid.isEmpty()) {
-            // Fallback: Spawned outside of an active raid (e.g., via spawn egg)
-            double radius = 144.0;
-            double radiusSquared = radius * radius;
-            for (Player player : boss.getWorld().getPlayers()) {
-                if (player.getLocation().distanceSquared(boss.getLocation()) <= radiusSquared) {
-                    bar.addPlayer(player);
+            Location bossLoc = boss.getLocation();
+            List<Player> worldPlayers = boss.getWorld().getPlayers();
+            targetPlayers = new HashSet<>(worldPlayers.size());
+            for (Player player : worldPlayers) {
+                if (player.getLocation().distanceSquared(bossLoc) <= FALLBACK_RADIUS_SQ) {
+                    targetPlayers.add(player);
                 }
             }
-            return;
+        } else {
+            AbstractCraftRaidWrapper craftRaid = VersionUtil.getCraftRaidWrapper(nmsRaid);
+            Optional<LargeRaid> lr = raidManager.getLargeRaid(craftRaid.getRaid());
+            targetPlayers = lr.map(largeRaid -> raidPlayersCache.computeIfAbsent(largeRaid, LargeRaid::getPlayersInRadius))
+                    .orElse(Collections.emptySet());
         }
 
-        AbstractCraftRaidWrapper craftRaid = VersionUtil.getCraftRaidWrapper(nmsRaid);
-        Optional<LargeRaid> lr = raidManager.getLargeRaid(craftRaid.getRaid());
-        if (lr.isPresent()) {
-            Set<Player> players = lr.get().getPlayersInRadius();
-            for (Player player : players)
-                bar.addPlayer(player);
+        syncBarPlayers(bar, targetPlayers);
+    }
+
+    private void syncBarPlayers(BossBar bar, Set<Player> targetPlayers) {
+        List<Player> currentPlayers = bar.getPlayers();
+        if (!currentPlayers.isEmpty()) {
+            for (Player current : new ArrayList<>(currentPlayers)) {
+                if (!targetPlayers.contains(current)) {
+                    bar.removePlayer(current);
+                }
+            }
+        }
+        for (Player target : targetPlayers) {
+            bar.addPlayer(target);
         }
     }
 
@@ -106,5 +167,4 @@ public class BossBarCreator implements Listener {
         if (bar != null)
             bar.removeAll();
     }
-
 }

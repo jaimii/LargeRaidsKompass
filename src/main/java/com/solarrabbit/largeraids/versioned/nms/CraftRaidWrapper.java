@@ -13,8 +13,26 @@ import org.bukkit.Raid;
 import org.bukkit.craftbukkit.CraftRaid;
 
 public class CraftRaidWrapper extends AbstractCraftRaidWrapper {
-    private static MethodHandle raidHandle;
-    private static MethodHandle levelHandle;
+    private static final MethodHandle RAID_HANDLE_GETTER;
+    private static final MethodHandle LEVEL_HANDLE_GETTER;
+
+    static {
+        MethodHandle rGetter = null;
+        MethodHandle lGetter = null;
+        try {
+            Field raidField = CraftRaid.class.getDeclaredField("handle");
+            raidField.setAccessible(true);
+            rGetter = MethodHandles.lookup().unreflectGetter(raidField);
+
+            Field levelField = CraftRaid.class.getDeclaredField("level");
+            levelField.setAccessible(true);
+            lGetter = MethodHandles.lookup().unreflectGetter(levelField);
+        } catch (ReflectiveOperationException e) {
+            e.printStackTrace();
+        }
+        RAID_HANDLE_GETTER = rGetter;
+        LEVEL_HANDLE_GETTER = lGetter;
+    }
 
     public CraftRaidWrapper(AbstractRaidWrapper nmsRaid) {
         super(new CraftRaid(((RaidWrapper) nmsRaid).raid, ((RaidWrapper) nmsRaid).server));
@@ -26,27 +44,18 @@ public class CraftRaidWrapper extends AbstractCraftRaidWrapper {
 
     @Override
     public RaidWrapper getHandle() {
-        net.minecraft.world.entity.raid.Raid nmsRaid;
-        net.minecraft.world.level.Level nmsLevel;
+        if (!(this.raid instanceof CraftRaid craftRaid)) {
+            return new RaidWrapper(null, null);
+        }
         try {
-            if (raidHandle == null) {
-                Field field = CraftRaid.class.getDeclaredField("handle");
-                field.setAccessible(true);
-                raidHandle = MethodHandles.lookup().unreflectGetter(field);
-            }
-            if (levelHandle == null) {
-                Field field = CraftRaid.class.getDeclaredField("level");
-                field.setAccessible(true);
-                levelHandle = MethodHandles.lookup().unreflectGetter(field);
-            }
-            nmsRaid = (net.minecraft.world.entity.raid.Raid) raidHandle.invokeExact((CraftRaid) raid);
-            nmsLevel = (net.minecraft.world.level.Level) levelHandle.invokeExact((CraftRaid) raid);
+            net.minecraft.world.entity.raid.Raid nmsRaid =
+                    (net.minecraft.world.entity.raid.Raid) RAID_HANDLE_GETTER.invokeExact(craftRaid);
+            net.minecraft.world.level.Level nmsLevel =
+                    (net.minecraft.world.level.Level) LEVEL_HANDLE_GETTER.invokeExact(craftRaid);
+            return new RaidWrapper(nmsRaid, (ServerLevel) nmsLevel);
         } catch (Throwable e) {
             e.printStackTrace();
-            nmsRaid = null;
-            nmsLevel = null;
+            return new RaidWrapper(null, null);
         }
-        return new RaidWrapper(nmsRaid, (ServerLevel) nmsLevel);
     }
-
 }

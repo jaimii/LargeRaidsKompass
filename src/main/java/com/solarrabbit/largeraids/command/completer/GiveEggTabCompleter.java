@@ -1,32 +1,62 @@
 package com.solarrabbit.largeraids.command.completer;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
+
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
-
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.stream.Collectors;
+import org.jetbrains.annotations.Nullable;
 
 public class GiveEggTabCompleter implements TabCompleter {
-    private final List<String> variants = Arrays.asList("necromancer", "bomber", "firework", "adjudicator", "king", "mythic:");
+    private static final List<String> VARIANTS = List.of(
+            "necromancer",
+            "bomber",
+            "firework",
+            "king",
+            "adjudicator",
+            "archillager",
+            "mythic:"
+    );
 
     @Override
-    public List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
-        if (args.length == 1) {
-            return Bukkit.getOnlinePlayers().stream()
-                    .map(Player::getName)
-                    .filter(name -> name.toLowerCase().startsWith(args[0].toLowerCase()))
-                    .collect(Collectors.toList());
-        } else if (args.length == 2) {
-            return variants.stream()
-                    .filter(v -> v.startsWith(args[1].toLowerCase()))
-                    .collect(Collectors.toList());
+    public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command,
+                                                @NotNull String label, @NotNull String[] args) {
+        if (!sender.hasPermission("largeraids.admin.giveegg")) {
+            return Collections.emptyList();
         }
-        return new ArrayList<>();
+
+        if (args.length == 1) {
+            String prefix = args[0].toLowerCase(Locale.ROOT);
+            List<String> players = new ArrayList<>();
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                if (player.getName().toLowerCase(Locale.ROOT).startsWith(prefix)) {
+                    players.add(player.getName());
+                }
+            }
+            return players;
+        }
+
+        if (args.length == 2) {
+            String prefix = args[1].toLowerCase(Locale.ROOT);
+            List<String> matches = new ArrayList<>();
+            for (String variant : VARIANTS) {
+                if (variant.startsWith(prefix)) {
+                    matches.add(variant);
+                }
+            }
+            return matches;
+        }
+
+        if (args.length == 3) {
+            return List.of("1", "5", "16", "64");
+        }
+
+        return Collections.emptyList();
     }
 }

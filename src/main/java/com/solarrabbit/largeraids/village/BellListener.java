@@ -32,7 +32,7 @@ public class BellListener extends RaidersOutliner implements Listener {
         if (evt.getAction() != org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK)
             return;
         Block block = evt.getClickedBlock();
-        if (block.getType() != Material.BELL)
+        if (block == null || block.getType() != Material.BELL)
             return;
         lastBellLoc = block.getLocation();
     }
@@ -40,6 +40,9 @@ public class BellListener extends RaidersOutliner implements Listener {
     @EventHandler
     public void onPlayerRingBell(PlayerStatisticIncrementEvent evt) {
         if (evt.getStatistic() != Statistic.BELL_RING)
+            return;
+        if (lastBellLoc == null || lastBellLoc.getWorld() == null
+                || !lastBellLoc.getWorld().equals(evt.getPlayer().getWorld()))
             return;
         Raid raid = manager.getRaid(lastBellLoc).orElse(null);
         if (raid == null)

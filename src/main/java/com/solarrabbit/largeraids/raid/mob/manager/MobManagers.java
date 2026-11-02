@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 import com.solarrabbit.largeraids.config.custommobs.CustomMobsConfig;
 import com.solarrabbit.largeraids.raid.mob.Adjudicator;
 import com.solarrabbit.largeraids.raid.mob.AdjudicatorRider;
+import com.solarrabbit.largeraids.raid.mob.ArchIllager;
 import com.solarrabbit.largeraids.raid.mob.Bomber;
 import com.solarrabbit.largeraids.raid.mob.FireworkPillager;
 import com.solarrabbit.largeraids.raid.mob.KingRaider;
@@ -32,6 +33,7 @@ public class MobManagers {
         managers.put(Bomber.class, new BomberManager());
         managers.put(Necromancer.class, new NecromancerManager());
         managers.put(KingRaider.class, new KingRaiderManager());
+        managers.put(ArchIllager.class, new ArchIllagerManager());
         managers.put(MythicRaider.class, new MythicRaiderManager());
 
         AdjudicatorManager adjudicatorManager = new AdjudicatorManager();

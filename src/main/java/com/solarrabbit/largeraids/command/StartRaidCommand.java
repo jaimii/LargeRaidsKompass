@@ -2,9 +2,11 @@ package com.solarrabbit.largeraids.command;
 
 import com.solarrabbit.largeraids.LargeRaids;
 import com.solarrabbit.largeraids.trigger.Trigger;
+import com.solarrabbit.largeraids.util.ChatColorUtil;
+
+import net.kyori.adventure.text.format.NamedTextColor;
 
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -28,43 +30,39 @@ public class StartRaidCommand extends Trigger implements CommandExecutor {
                     Player player = Bukkit.getPlayer(args[1]);
                     location = player == null ? null : player.getLocation();
                     if (location == null) {
-                        sender.sendMessage(ChatColor.RED + this.plugin.getMessage("start-raid.player-not-found"));
+                        ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("start-raid.player-not-found"));
                         return false;
                     }
                     break;
                 case "center":
                     location = plugin.getDatabaseAdapter().getCentre(args[1]);
                     if (location == null) {
-                        sender.sendMessage(ChatColor.RED + this.plugin.getMessage("start-raid.no-village-centers"));
+                        ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("start-raid.no-village-centers"));
                         return false;
                     } else if (location.getWorld() == null) {
-                        sender.sendMessage(ChatColor.RED + this.plugin.getMessage("start-raid.village-center-world-missing"));
+                        ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("start-raid.village-center-world-missing"));
                         return false;
                     }
                     break;
                 default:
                     return false;
             }
-            sender.sendMessage(ChatColor.GREEN + String.format(this.plugin.getMessage("start-raid.started-at"),
+            ChatColorUtil.send(sender, NamedTextColor.GREEN, String.format(this.plugin.getMessage("start-raid.started-at"),
                     location.getBlockX(), location.getBlockY(), location.getBlockZ()));
             triggerRaid(sender, location);
             return true;
-        } else if (sender instanceof Player) {
-            Player player = (Player) sender;
+        } else if (sender instanceof Player player) {
             Location location = player.getLocation();
-            sender.sendMessage(ChatColor.GREEN + String.format(this.plugin.getMessage("start-raid.started-at"),
+            ChatColorUtil.send(sender, NamedTextColor.GREEN, String.format(this.plugin.getMessage("start-raid.started-at"),
                     location.getBlockX(), location.getBlockY(), location.getBlockZ()));
             triggerRaid(sender, location);
             return true;
         }
-        if (!(sender instanceof Player))
-            sender.sendMessage(ChatColor.RED + this.plugin.getMessage("start-raid.specify-player"));
+        ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("start-raid.specify-player"));
         return false;
     }
 
     @Override
     public void unregisterListener() {
-        // Nothing to do here since this trigger isn't a configurable option.
     }
-
 }

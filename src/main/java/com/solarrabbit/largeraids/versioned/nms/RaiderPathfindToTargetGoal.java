@@ -48,10 +48,10 @@ public class RaiderPathfindToTargetGoal<T extends Raider> extends PathfindToRaid
     @Override
     public boolean canUse() {
         return this.mob.getTarget() == null
-            && !this.mob.hasControllingPassenger()
-            && this.mob.hasActiveRaid()
-            && !this.mob.getCurrentRaid().isOver()
-            && !isCloseToGoal();
+                && !this.mob.hasControllingPassenger()
+                && this.mob.hasActiveRaid()
+                && !this.mob.getCurrentRaid().isOver()
+                && !isCloseToGoal();
     }
 
     @Override
@@ -68,12 +68,12 @@ public class RaiderPathfindToTargetGoal<T extends Raider> extends PathfindToRaid
                 this.recruitNearby(currentRaid);
             }
 
-            if (this.changed) { 
+            if (this.changed) {
                 this.mob.getNavigation().stop();
                 this.changed = false;
             }
             if (!this.mob.isPathFinding()) {
-                Vec3 posTowards = targetPos != null ? targetPos.getBottomCenter()
+                Vec3 posTowards = targetPos != null ? Vec3.atBottomCenterOf(targetPos)
                         : DefaultRandomPos.getPosTowards(this.mob, 15, 4, Vec3.atBottomCenterOf(
                         currentRaid.getCenter()), (float) (Math.PI / 2));
                 if (posTowards != null) {
@@ -88,7 +88,8 @@ public class RaiderPathfindToTargetGoal<T extends Raider> extends PathfindToRaid
             ServerLevel serverLevel = getServerLevel(this.mob.level());
             Set<Raider> set = Sets.newHashSet();
             List<Raider> entitiesOfClass = serverLevel.getEntitiesOfClass(
-                Raider.class, this.mob.getBoundingBox().inflate(16.0), raider1 -> !raider1.hasActiveRaid() && Raids.canJoinRaid(raider1)
+                    Raider.class, this.mob.getBoundingBox().inflate(16.0),
+                    raider1 -> !raider1.hasActiveRaid() && Raids.canJoinRaid(raider1)
             );
             set.addAll(entitiesOfClass);
 

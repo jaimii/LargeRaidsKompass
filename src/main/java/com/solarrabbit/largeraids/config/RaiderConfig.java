@@ -46,6 +46,8 @@ import io.lumine.mythic.core.mobs.MobExecutor;
 public class RaiderConfig {
     private static final EntityType[] DEFAULT_RAIDER_TYPES = new EntityType[] { EntityType.PILLAGER,
             EntityType.VINDICATOR, EntityType.RAVAGER, EntityType.WITCH, EntityType.EVOKER, EntityType.ILLUSIONER };
+    private static MythicMobsLoader activeMythicLoader;
+
     private final Map<Function<Location, ? extends Raider>, List<Integer>> mobsSupplierMap;
     private final Map<Function<Location, MythicRaider>, List<Integer>> mythicMobsSupplierMap;
     private final Map<String, List<Integer>> stringMappings;
@@ -53,9 +55,11 @@ public class RaiderConfig {
 
     RaiderConfig(ConfigurationSection config) {
         stringMappings = new HashMap<>();
-        Set<String> keys = config.getKeys(false);
-        for (String key : keys)
-            stringMappings.put(key, config.getIntegerList(key));
+        if (config != null) {
+            Set<String> keys = config.getKeys(false);
+            for (String key : keys)
+                stringMappings.put(key, config.getIntegerList(key));
+        }
         mobManagers = JavaPlugin.getPlugin(LargeRaids.class).getMobManagers();
         mobsSupplierMap = new HashMap<>();
         mythicMobsSupplierMap = new HashMap<>();
@@ -64,8 +68,17 @@ public class RaiderConfig {
 
     public Map<Function<Location, ? extends Raider>, Integer> getWaveMobs(int wave) {
         Map<Function<Location, ? extends Raider>, Integer> mobsSuppliers = new HashMap<>();
-        mobsSupplierMap.forEach((supplier, list) -> mobsSuppliers.put(supplier, list.get(wave - 1)));
-        mythicMobsSupplierMap.forEach((supplier, list) -> mobsSuppliers.put(supplier, list.get(wave - 1)));
+        int index = Math.max(0, wave - 1);
+        mobsSupplierMap.forEach((supplier, list) -> {
+            if (index < list.size()) {
+                mobsSuppliers.put(supplier, list.get(index));
+            }
+        });
+        mythicMobsSupplierMap.forEach((supplier, list) -> {
+            if (index < list.size()) {
+                mobsSuppliers.put(supplier, list.get(index));
+            }
+        });
         return mobsSuppliers;
     }
 
@@ -73,7 +86,7 @@ public class RaiderConfig {
         loadVanillaRaiders();
         loadCustomRaiders();
         if (Bukkit.getPluginManager().getPlugin("MythicMobs") != null) {
-            JavaPlugin.getPlugin(LargeRaids.class).log("MythicMobs intergration enabled.", Level.INFO);
+            JavaPlugin.getPlugin(LargeRaids.class).log("MythicMobs integration enabled.", Level.INFO);
             loadMythicRaiders();
         }
     }
@@ -95,49 +108,51 @@ public class RaiderConfig {
     private void loadCustomRaiders() {
         FireworkPillagerManager fireworkPillagerManager = (FireworkPillagerManager) mobManagers
                 .getMobManager(FireworkPillager.class);
-        Function<Location, FireworkPillager> fireworkPillagerSupplier = (loc) -> fireworkPillagerManager.spawn(loc);
+        Function<Location, FireworkPillager> fireworkPillagerSupplier = fireworkPillagerManager::spawn;
         List<Integer> list = stringMappings.remove("fireworkpillager");
         if (list != null)
             mobsSupplierMap.put(fireworkPillagerSupplier, list);
 
         BomberManager bomberManager = (BomberManager) mobManagers.getMobManager(Bomber.class);
-        Function<Location, Bomber> bomberSupplier = (loc) -> bomberManager.spawn(loc);
+        Function<Location, Bomber> bomberSupplier = bomberManager::spawn;
         List<Integer> bomberList = stringMappings.remove("bomber");
         if (bomberList != null)
             mobsSupplierMap.put(bomberSupplier, bomberList);
 
         NecromancerManager necromancerManager = (NecromancerManager) mobManagers.getMobManager(Necromancer.class);
-        Function<Location, Necromancer> necromancerSupplier = (loc) -> necromancerManager.spawn(loc);
+        Function<Location, Necromancer> necromancerSupplier = necromancerManager::spawn;
         List<Integer> necromancerList = stringMappings.remove("necromancer");
         if (necromancerList != null)
             mobsSupplierMap.put(necromancerSupplier, necromancerList);
 
         KingRaiderManager kingRaiderManager = (KingRaiderManager) mobManagers.getMobManager(KingRaider.class);
-        Function<Location, KingRaider> kingRaiderSupplier = (loc) -> kingRaiderManager.spawn(loc);
+        Function<Location, KingRaider> kingRaiderSupplier = kingRaiderManager::spawn;
         List<Integer> kingRaiderList = stringMappings.remove("kingraider");
         if (kingRaiderList != null)
             mobsSupplierMap.put(kingRaiderSupplier, kingRaiderList);
 
         AdjudicatorManager adjudicatorManager = (AdjudicatorManager) mobManagers.getMobManager(Adjudicator.class);
-        Function<Location, Adjudicator> adjudicatorSupplier = (loc) -> adjudicatorManager.spawn(loc);
+        Function<Location, Adjudicator> adjudicatorSupplier = adjudicatorManager::spawn;
         List<Integer> adjudicatorList = stringMappings.remove("adjudicator");
         if (adjudicatorList != null)
             mobsSupplierMap.put(adjudicatorSupplier, adjudicatorList);
 
-        Function<Location, AdjudicatorRider> adjudicatorRiderSupplier = (loc) -> adjudicatorManager.spawnRider(loc);
+        Function<Location, AdjudicatorRider> adjudicatorRiderSupplier = adjudicatorManager::spawnRider;
         List<Integer> adjudicatorRiderList = stringMappings.remove("adjudicatorrider");
         if (adjudicatorRiderList != null)
             mobsSupplierMap.put(adjudicatorRiderSupplier, adjudicatorRiderList);
     }
 
     private void loadMythicRaiders() {
-        MythicMobsLoader loader = new MythicMobsLoader();
         JavaPlugin plugin = JavaPlugin.getPlugin(LargeRaids.class);
-        MythicReloadedEvent.getHandlerList().unregister(plugin);
-        PluginEnableEvent.getHandlerList().unregister(plugin);
-        Bukkit.getPluginManager().registerEvents(loader, plugin);
+        if (activeMythicLoader != null) {
+            MythicReloadedEvent.getHandlerList().unregister(activeMythicLoader);
+            PluginEnableEvent.getHandlerList().unregister(activeMythicLoader);
+        }
+        activeMythicLoader = new MythicMobsLoader();
+        Bukkit.getPluginManager().registerEvents(activeMythicLoader, plugin);
         Optional<MythicBukkit> adapter = Optional.ofNullable(MythicBukkit.inst());
-        adapter.map(MythicBukkit::getMobManager).ifPresent(loader::loadMobs);
+        adapter.map(MythicBukkit::getMobManager).ifPresent(activeMythicLoader::loadMobs);
     }
 
     private class MythicMobsLoader implements Listener {

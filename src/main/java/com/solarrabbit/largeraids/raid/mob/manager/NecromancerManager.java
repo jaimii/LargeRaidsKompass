@@ -3,9 +3,14 @@ package com.solarrabbit.largeraids.raid.mob.manager;
 import com.solarrabbit.largeraids.LargeRaids;
 import com.solarrabbit.largeraids.config.custommobs.CustomMobsConfig;
 import com.solarrabbit.largeraids.raid.mob.Necromancer;
+import com.solarrabbit.largeraids.util.ChatColorUtil;
 import com.solarrabbit.largeraids.util.VersionUtil;
 
-import org.bukkit.ChatColor;
+import io.papermc.paper.datacomponent.DataComponentTypes;
+import io.papermc.paper.datacomponent.item.TooltipDisplay;
+
+import net.kyori.adventure.text.Component;
+
 import org.bukkit.DyeColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -30,18 +35,35 @@ import org.bukkit.event.block.BlockIgniteEvent.IgniteCause;
 import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityCombustByEntityEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EntitySpawnEvent;
-import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
+import org.bukkit.event.entity.EntityTransformEvent;
 import org.bukkit.inventory.EntityEquipment;
-import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.BannerMeta;
-import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public class NecromancerManager implements CustomRaiderManager, Listener {
+    private static final int DEATH_XP_POINTS = getXpForLevel(25);
+    private static final Component NECROMANCER_NAME = ChatColorUtil.parse("<gold>Necromancer");
+
+    private final LargeRaids plugin;
+    private final NamespacedKey necromancerKey;
+    private final NamespacedKey necromancerLightningKey;
+    private final ItemStack bannerTemplate;
+    private final ItemStack chainHelmetTemplate;
+    private final ItemStack pumpkinTemplate;
+
+    public NecromancerManager() {
+        this.plugin = JavaPlugin.getPlugin(LargeRaids.class);
+        this.necromancerKey = new NamespacedKey(plugin, "necromancer");
+        this.necromancerLightningKey = new NamespacedKey(plugin, "necromancer_lightning");
+        this.bannerTemplate = createDefaultBanner();
+        this.chainHelmetTemplate = new ItemStack(Material.CHAINMAIL_HELMET);
+        this.pumpkinTemplate = new ItemStack(Material.CARVED_PUMPKIN);
+    }
 
     @Override
     public void loadSettings(CustomMobsConfig config) {
@@ -51,13 +73,17 @@ public class NecromancerManager implements CustomRaiderManager, Listener {
     public Necromancer spawn(Location location) {
         Spellcaster evoker = (Spellcaster) location.getWorld().spawnEntity(location, EntityType.EVOKER);
         EntityEquipment equipment = evoker.getEquipment();
-        equipment.setHelmet(getDefaultBanner());
-        equipment.setHelmetDropChance(1.0f);
+        if (equipment != null) {
+            equipment.setHelmet(bannerTemplate.clone());
+            equipment.setHelmetDropChance(1.0f);
+        }
 
         evoker.setPatrolLeader(true);
+        evoker.getPersistentDataContainer().set(necromancerKey, PersistentDataType.BYTE, (byte) 0);
+        evoker.customName(NECROMANCER_NAME);
 
-        evoker.getPersistentDataContainer().set(getNecromancerNamespacedKey(), PersistentDataType.BYTE, (byte) 0);
-        evoker.setCustomName("Necromancer");
+        EvokerGoalUtil.injectRaidFleeGoal(evoker, location);
+
         return new Necromancer(evoker);
     }
 
@@ -67,20 +93,24 @@ public class NecromancerManager implements CustomRaiderManager, Listener {
             return;
         Vex vex = (Vex) evt.getEntity();
         LivingEntity owner = VersionUtil.getCraftVexWrapper(vex).getOwner();
-        if (!(owner instanceof Spellcaster))
+        if (!(owner instanceof Spellcaster evoker))
             return;
-        Spellcaster evoker = (Spellcaster) owner;
         if (isNecromancer(evoker)) {
             evt.setCancelled(true);
             LivingEntity target = evoker.getTarget();
+            Location loc = vex.getLocation();
             if (target instanceof HumanEntity) {
-                vex.getWorld().strikeLightningEffect(vex.getLocation());
-                Skeleton skeleton = (Skeleton) vex.getWorld().spawnEntity(vex.getLocation(), EntityType.SKELETON);
-                skeleton.getEquipment().setHelmet(new ItemStack(Material.CHAINMAIL_HELMET));
+                loc.getWorld().strikeLightningEffect(loc);
+                Skeleton skeleton = (Skeleton) loc.getWorld().spawnEntity(loc, EntityType.SKELETON);
+                if (skeleton.getEquipment() != null) {
+                    skeleton.getEquipment().setHelmet(chainHelmetTemplate.clone());
+                }
             } else if (target instanceof Villager) {
-                vex.getWorld().strikeLightningEffect(vex.getLocation());
-                Zombie zombie = (Zombie) vex.getWorld().spawnEntity(vex.getLocation(), EntityType.ZOMBIE);
-                zombie.getEquipment().setHelmet(new ItemStack(Material.CARVED_PUMPKIN));
+                loc.getWorld().strikeLightningEffect(loc);
+                Zombie zombie = (Zombie) loc.getWorld().spawnEntity(loc, EntityType.ZOMBIE);
+                if (zombie.getEquipment() != null) {
+                    zombie.getEquipment().setHelmet(pumpkinTemplate.clone());
+                }
             }
         }
     }
@@ -91,11 +121,10 @@ public class NecromancerManager implements CustomRaiderManager, Listener {
             return;
         EvokerFangs fangs = (EvokerFangs) evt.getEntity();
         LivingEntity owner = fangs.getOwner();
-        if (owner instanceof Spellcaster && isNecromancer((Spellcaster) owner)) {
+        if (owner instanceof Spellcaster evoker && isNecromancer(evoker)) {
             evt.setCancelled(true);
             LightningStrike lightning = fangs.getWorld().strikeLightning(fangs.getLocation());
-            lightning.getPersistentDataContainer().set(getNecromancerLightningNamespacedKey(), PersistentDataType.BYTE,
-                    (byte) 0);
+            lightning.getPersistentDataContainer().set(necromancerLightningKey, PersistentDataType.BYTE, (byte) 0);
         }
     }
 
@@ -103,8 +132,7 @@ public class NecromancerManager implements CustomRaiderManager, Listener {
     private void onLightningFire(BlockIgniteEvent evt) {
         if (evt.getCause() != IgniteCause.LIGHTNING)
             return;
-        LightningStrike lightning = (LightningStrike) evt.getIgnitingEntity();
-        if (isNecromancerLightning(lightning))
+        if (evt.getIgnitingEntity() instanceof LightningStrike lightning && isNecromancerLightning(lightning))
             evt.setCancelled(true);
     }
 
@@ -114,38 +142,36 @@ public class NecromancerManager implements CustomRaiderManager, Listener {
             return;
         if (!(evt.getEntity() instanceof Raider))
             return;
-        if (isNecromancerLightning((LightningStrike) evt.getDamager()))
+        if (evt.getDamager() instanceof LightningStrike lightning && isNecromancerLightning(lightning))
             evt.setCancelled(true);
     }
 
     @EventHandler
     private void onLightningSetFire(EntityCombustByEntityEvent evt) {
-        if (!(evt.getCombuster() instanceof LightningStrike))
+        if (!(evt.getCombuster() instanceof LightningStrike lightning))
             return;
-        if (!isNecromancerLightning((LightningStrike) evt.getCombuster()))
+        if (!isNecromancerLightning(lightning))
             return;
         if (evt.getEntity() instanceof Raider)
             evt.setCancelled(true);
     }
 
     @EventHandler
-    private void onVillagerTransform(org.bukkit.event.entity.EntityTransformEvent evt) {
-        if (evt.getTransformReason() == org.bukkit.event.entity.EntityTransformEvent.TransformReason.LIGHTNING) {
-            if (evt.getEntityType() == EntityType.WITCH) {
-                if (isNecromancerLightningNearby(evt.getEntity().getLocation())) {
-                    evt.setCancelled(true);
-                }
+    private void onVillagerTransform(EntityTransformEvent evt) {
+        if (evt.getTransformReason() == EntityTransformEvent.TransformReason.LIGHTNING
+                && evt.getEntityType() == EntityType.WITCH) {
+            if (isNecromancerLightningNearby(evt.getEntity().getLocation())) {
+                evt.setCancelled(true);
             }
         }
     }
 
     @EventHandler
     private void onCreatureSpawn(CreatureSpawnEvent evt) {
-        if (evt.getSpawnReason() == CreatureSpawnEvent.SpawnReason.LIGHTNING) {
-            if (evt.getEntityType() == EntityType.WITCH) {
-                if (isNecromancerLightningNearby(evt.getLocation())) {
-                    evt.setCancelled(true);
-                }
+        if (evt.getSpawnReason() == CreatureSpawnEvent.SpawnReason.LIGHTNING
+                && evt.getEntityType() == EntityType.WITCH) {
+            if (isNecromancerLightningNearby(evt.getLocation())) {
+                evt.setCancelled(true);
             }
         }
     }
@@ -156,11 +182,11 @@ public class NecromancerManager implements CustomRaiderManager, Listener {
             return;
         Spellcaster evoker = (Spellcaster) evt.getEntity();
         if (isNecromancer(evoker)) {
-            evt.setDroppedExp(getXpForLevel(25));
+            evt.setDroppedExp(DEATH_XP_POINTS);
         }
     }
 
-    private int getXpForLevel(int level) {
+    private static int getXpForLevel(int level) {
         if (level <= 16) {
             return level * level + 6 * level;
         } else if (level <= 31) {
@@ -170,49 +196,39 @@ public class NecromancerManager implements CustomRaiderManager, Listener {
         }
     }
 
-    private ItemStack getDefaultBanner() {
+    private static ItemStack createDefaultBanner() {
         ItemStack banner = new ItemStack(Material.GRAY_BANNER);
         BannerMeta meta = (BannerMeta) banner.getItemMeta();
-        meta.addPattern(new Pattern(DyeColor.YELLOW, PatternType.RHOMBUS));
-        meta.addPattern(new Pattern(DyeColor.GRAY, PatternType.STRIPE_DOWNLEFT));
-        meta.addPattern(new Pattern(DyeColor.YELLOW, PatternType.STRIPE_MIDDLE));
-        meta.addPattern(new Pattern(DyeColor.BLACK, PatternType.SKULL));
-        meta.addPattern(new Pattern(DyeColor.WHITE, PatternType.SKULL));
-        meta.addPattern(new Pattern(DyeColor.BLACK, PatternType.BORDER));
-        meta.addItemFlags(ItemFlag.HIDE_ADDITIONAL_TOOLTIP);
-        meta.setDisplayName(ChatColor.GOLD.toString() + ChatColor.ITALIC + "Necromancer Banner");
-        banner.setItemMeta(meta);
+        if (meta != null) {
+            meta.addPattern(new Pattern(DyeColor.YELLOW, PatternType.RHOMBUS));
+            meta.addPattern(new Pattern(DyeColor.GRAY, PatternType.STRIPE_DOWNLEFT));
+            meta.addPattern(new Pattern(DyeColor.YELLOW, PatternType.STRIPE_MIDDLE));
+            meta.addPattern(new Pattern(DyeColor.BLACK, PatternType.SKULL));
+            meta.addPattern(new Pattern(DyeColor.WHITE, PatternType.SKULL));
+            meta.addPattern(new Pattern(DyeColor.BLACK, PatternType.BORDER));
+            meta.displayName(ChatColorUtil.parseItem("<gold><italic>Necromancer Banner"));
+            banner.setItemMeta(meta);
+        }
+        banner.setData(DataComponentTypes.TOOLTIP_DISPLAY,
+                TooltipDisplay.tooltipDisplay().addHiddenComponents(DataComponentTypes.BANNER_PATTERNS).build());
         return banner;
     }
 
     private boolean isNecromancer(Spellcaster entity) {
-        PersistentDataContainer pdc = entity.getPersistentDataContainer();
-        return pdc.has(getNecromancerNamespacedKey(), PersistentDataType.BYTE);
+        return entity.getPersistentDataContainer().has(necromancerKey, PersistentDataType.BYTE);
     }
 
     private boolean isNecromancerLightning(LightningStrike lightning) {
-        PersistentDataContainer pdc = lightning.getPersistentDataContainer();
-        return pdc.has(getNecromancerLightningNamespacedKey(), PersistentDataType.BYTE);
+        return lightning.getPersistentDataContainer().has(necromancerLightningKey, PersistentDataType.BYTE);
     }
 
     private boolean isNecromancerLightningNearby(Location loc) {
-        double radius = 6.0;
-        for (org.bukkit.entity.Entity entity : loc.getWorld().getNearbyEntities(loc, radius, radius, radius)) {
-            if (entity instanceof org.bukkit.entity.LightningStrike) {
-                org.bukkit.entity.LightningStrike lightning = (org.bukkit.entity.LightningStrike) entity;
-                if (lightning.getPersistentDataContainer().has(getNecromancerLightningNamespacedKey(), PersistentDataType.BYTE)) {
-                    return true;
-                }
+        if (loc.getWorld() == null) return false;
+        for (LightningStrike lightning : loc.getWorld().getNearbyEntitiesByType(LightningStrike.class, loc, 6.0, 6.0, 6.0)) {
+            if (isNecromancerLightning(lightning)) {
+                return true;
             }
         }
         return false;
-    }
-
-    private NamespacedKey getNecromancerNamespacedKey() {
-        return new NamespacedKey(JavaPlugin.getPlugin(LargeRaids.class), "necromancer");
-    }
-
-    private NamespacedKey getNecromancerLightningNamespacedKey() {
-        return new NamespacedKey(JavaPlugin.getPlugin(LargeRaids.class), "necromancer_lightning");
     }
 }

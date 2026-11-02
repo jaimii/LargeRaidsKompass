@@ -58,6 +58,14 @@ public class CustomEggUtil {
                     displayName = "Adjudicator Spawn Egg";
                     color = NamedTextColor.GOLD;
                     break;
+                case "archillager":
+                case "arch-illager":
+                case "arch":
+                    material = Material.RAVAGER_SPAWN_EGG;
+                    displayName = "Arch-Illager Spawn Egg";
+                    color = NamedTextColor.BLUE;
+                    variant = "archillager";
+                    break;
                 default:
                     return null;
             }
@@ -69,9 +77,7 @@ public class CustomEggUtil {
             meta.displayName(Component.text(displayName, color).decoration(TextDecoration.ITALIC, false));
             NamespacedKey key = new NamespacedKey(plugin, PDC_KEY);
             meta.getPersistentDataContainer().set(key, PersistentDataType.STRING, variant);
-
             meta.setEnchantmentGlintOverride(true);
-
             egg.setItemMeta(meta);
         }
         return egg;

@@ -1,27 +1,55 @@
 package com.solarrabbit.largeraids.command;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import com.solarrabbit.largeraids.LargeRaids;
+import com.solarrabbit.largeraids.util.ChatColorUtil;
+
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.event.HoverEvent;
+import net.kyori.adventure.text.format.NamedTextColor;
 
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Particle;
-import org.bukkit.World;
 import org.bukkit.Particle.DustOptions;
+import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
-import net.md_5.bungee.api.chat.ClickEvent;
-import net.md_5.bungee.api.chat.HoverEvent;
-import net.md_5.bungee.api.chat.TextComponent;
-import net.md_5.bungee.api.chat.hover.content.Text;
-
 public class VillageCentresCommand implements CommandExecutor {
+    private static final double SPHERE_RADIUS = 96.0;
+    private static final double VIEW_DISTANCE_SQ = 256.0 * 256.0;
+    private static final DustOptions DUST_OPTIONS = new DustOptions(Color.ORANGE, 200.0F);
+    private static final double[][] SPHERE_OFFSETS;
+
+    static {
+        final int freq = 25;
+        List<double[]> points = new ArrayList<>(freq * freq);
+        for (int i = 0; i <= freq; i++) {
+            double y = (double) (2 * i - freq) / freq;
+            double r = Math.sqrt(Math.max(0.0, 1.0 - y * y));
+            if (r < 1e-6) {
+                points.add(new double[] { 0.0, y * SPHERE_RADIUS, 0.0 });
+                continue;
+            }
+            for (int j = 0; j < freq; j++) {
+                double alpha = 2 * Math.PI * j / freq;
+                double dx = Math.sin(alpha) * SPHERE_RADIUS * r;
+                double dy = y * SPHERE_RADIUS;
+                double dz = Math.cos(alpha) * SPHERE_RADIUS * r;
+                points.add(new double[] { dx, dy, dz });
+            }
+        }
+        SPHERE_OFFSETS = points.toArray(new double[0][]);
+    }
+
     private final LargeRaids plugin;
     private boolean isShowing;
     private int taskId;
@@ -38,27 +66,27 @@ public class VillageCentresCommand implements CommandExecutor {
             return true;
         }
 
-        if (!(sender instanceof Player))
+        if (!(sender instanceof Player player))
             return true;
 
         switch (args[0]) {
             case "add":
                 if (args.length < 2)
                     return false;
-                this.add((Player) sender, args[1]);
+                this.add(player, args[1]);
                 return true;
             case "remove":
                 if (args.length < 2)
                     return false;
-                this.remove((Player) sender, args[1]);
+                this.remove(player, args[1]);
                 return true;
             case "show":
                 show();
-                sender.sendMessage(ChatColor.GREEN + this.plugin.getMessage("village-centers.show.success"));
+                ChatColorUtil.send(sender, NamedTextColor.GREEN, this.plugin.getMessage("village-centers.show.success"));
                 return true;
             case "hide":
                 hide();
-                sender.sendMessage(ChatColor.GREEN + this.plugin.getMessage("village-centers.hide.success"));
+                ChatColorUtil.send(sender, NamedTextColor.GREEN, this.plugin.getMessage("village-centers.hide.success"));
                 return true;
             default:
                 return false;
@@ -68,19 +96,26 @@ public class VillageCentresCommand implements CommandExecutor {
     private void show() {
         if (isShowing)
             return;
-        Map<String, Location> centers = plugin.getDatabaseAdapter().getCentres();
         taskId = Bukkit.getScheduler()
-                .runTaskTimer(plugin, () -> centers.values().forEach(loc -> {
-                    highlightLocation(loc);
-                    plotSphere(loc, 96);
-                }), 0, 20)
+                .runTaskTimer(plugin, () -> {
+                    Map<String, Location> centers = plugin.getDatabaseAdapter().getCentres();
+                    if (centers == null || centers.isEmpty())
+                        return;
+                    for (Location loc : centers.values()) {
+                        if (isLoadedAndViewed(loc)) {
+                            highlightLocation(loc);
+                            plotSphere(loc);
+                        }
+                    }
+                }, 0L, 20L)
                 .getTaskId();
         isShowing = true;
     }
 
     private void hide() {
-        if (isShowing)
+        if (isShowing) {
             Bukkit.getScheduler().cancelTask(taskId);
+        }
         isShowing = false;
     }
 
@@ -88,49 +123,48 @@ public class VillageCentresCommand implements CommandExecutor {
         Location center = this.plugin.getDatabaseAdapter().getCentre(name);
 
         if (center != null) {
-            player.sendMessage(ChatColor.RED + this.plugin.getMessage("village-centers.add.already-exist"));
+            ChatColorUtil.send(player, NamedTextColor.RED, this.plugin.getMessage("village-centers.add.already-exist"));
             return;
         }
 
         Location newCenter = player.getLocation();
         if (plugin.getVillageManager().addVillage(newCenter)) {
             plugin.getDatabaseAdapter().addCentre(newCenter, name);
-            player.sendMessage(ChatColor.GREEN + this.plugin.getMessage("village-centers.add.add-success"));
-        } else
-            player.sendMessage(ChatColor.RED + this.plugin.getMessage("village-centers.add.add-fail"));
+            ChatColorUtil.send(player, NamedTextColor.GREEN, this.plugin.getMessage("village-centers.add.add-success"));
+        } else {
+            ChatColorUtil.send(player, NamedTextColor.RED, this.plugin.getMessage("village-centers.add.add-fail"));
+        }
     }
 
     private void remove(Player player, String name) {
         Location center = plugin.getDatabaseAdapter().getCentre(name);
 
         if (center == null) {
-            player.sendMessage(ChatColor.RED + this.plugin.getMessage("village-centers.remove.no-exist"));
+            ChatColorUtil.send(player, NamedTextColor.RED, this.plugin.getMessage("village-centers.remove.no-exist"));
             return;
         }
 
-        if (center.getWorld() != null)
+        if (center.getWorld() != null) {
             plugin.getVillageManager().removeVillage(center);
+        }
         plugin.getDatabaseAdapter().removeCentre(name);
-        player.sendMessage(ChatColor.GREEN + this.plugin.getMessage("village-centers.remove.remove-success"));
-
+        ChatColorUtil.send(player, NamedTextColor.GREEN, this.plugin.getMessage("village-centers.remove.remove-success"));
     }
 
     private void list(CommandSender sender) {
         Map<String, Location> map = this.plugin.getDatabaseAdapter().getCentres();
-        if (map.isEmpty()) {
-            sender.sendMessage(ChatColor.YELLOW + this.plugin.getMessage("village-centers.list.no-exist"));
+        if (map == null || map.isEmpty()) {
+            ChatColorUtil.send(sender, NamedTextColor.YELLOW, this.plugin.getMessage("village-centers.list.no-exist"));
             return;
         }
-        sender.sendMessage(ChatColor.GREEN + this.plugin.getMessage("village-centers.list.list-all"));
-        map.forEach((str, loc) -> sender.spigot().sendMessage(getClickableComponent(str, loc)));
+        ChatColorUtil.send(sender, NamedTextColor.GREEN, this.plugin.getMessage("village-centers.list.list-all"));
+        map.forEach((str, loc) -> sender.sendMessage(getClickableComponent(str, loc)));
     }
 
-    private TextComponent getClickableComponent(String name, Location loc) {
-        TextComponent text = new TextComponent(name + " " + getLocString(loc));
-        text.setColor(net.md_5.bungee.api.ChatColor.GREEN);
-        text.setHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, new Text("Click to teleport")));
-        text.setClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, getTeleportCommand(loc)));
-        return text;
+    private Component getClickableComponent(String name, Location loc) {
+        return Component.text(name + " " + getLocString(loc), NamedTextColor.GREEN)
+                .hoverEvent(HoverEvent.showText(Component.text("Click to teleport")))
+                .clickEvent(ClickEvent.suggestCommand(getTeleportCommand(loc)));
     }
 
     private String getTeleportCommand(Location loc) {
@@ -147,34 +181,36 @@ public class VillageCentresCommand implements CommandExecutor {
         return String.format("%.3f", d);
     }
 
+    private boolean isLoadedAndViewed(Location center) {
+        if (center == null) return false;
+        World world = center.getWorld();
+        if (world == null || !world.isChunkLoaded(center.getBlockX() >> 4, center.getBlockZ() >> 4))
+            return false;
+
+        for (Player player : world.getPlayers()) {
+            if (player.getLocation().distanceSquared(center) <= VIEW_DISTANCE_SQ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private void highlightLocation(Location location) {
-        if (location.getWorld() == null || !location.getChunk().isLoaded())
-            return;
         location.getWorld().spawnParticle(Particle.CRIT, location, 50, 0.5, 0.5, 0.5, 0);
     }
 
-    private void plotSphere(Location center, double radius) {
+    private void plotSphere(Location center) {
         World world = center.getWorld();
-        if (world == null || !center.getChunk().isLoaded())
-            return;
+        double baseX = center.getBlockX();
+        double baseY = center.getBlockY();
+        double baseZ = center.getBlockZ();
 
-        DustOptions options = new DustOptions(Color.ORANGE, 200.0F);
-        Location mutLoc = center.clone();
-        final int freq = 25;
-
-        for (int i = 0; i <= freq; i++) {
-            double y = (double) (2 * i - freq) / freq;
-            double r = Math.cos(Math.asin(y));
-            for (int j = 0; j < freq; j++) {
-                double alpha = 2 * Math.PI * j / freq;
-                double x = Math.sin(alpha);
-                double z = Math.cos(alpha);
-
-                mutLoc.setX((x * radius * r) + center.getBlockX());
-                mutLoc.setZ((z * radius * r) + center.getBlockZ());
-                mutLoc.setY((y * radius) + center.getBlockY());
-                world.spawnParticle(Particle.DUST, mutLoc, 1, 1, 1, 1, 0, options, true);
-            }
+        for (double[] offset : SPHERE_OFFSETS) {
+            world.spawnParticle(Particle.DUST,
+                    baseX + offset[0],
+                    baseY + offset[1],
+                    baseZ + offset[2],
+                    1, 1, 1, 1, 0, DUST_OPTIONS, true);
         }
     }
 }

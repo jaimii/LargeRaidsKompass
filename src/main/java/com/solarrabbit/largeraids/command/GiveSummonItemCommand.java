@@ -1,8 +1,11 @@
 package com.solarrabbit.largeraids.command;
 
 import com.solarrabbit.largeraids.LargeRaids;
+import com.solarrabbit.largeraids.util.ChatColorUtil;
+
+import net.kyori.adventure.text.format.NamedTextColor;
+
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -22,7 +25,7 @@ public class GiveSummonItemCommand implements CommandExecutor {
             return false;
         Player targetPlayer = Bukkit.getPlayer(args[0]);
         if (targetPlayer == null) {
-            sender.sendMessage(ChatColor.RED + this.plugin.getMessage("give-items.cannot-find"));
+            ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("give-items.cannot-find"));
             return false;
         }
 
@@ -33,12 +36,12 @@ public class GiveSummonItemCommand implements CommandExecutor {
             try {
                 int amount = Integer.parseInt(args[1]);
                 if (amount <= 0)
-                    sender.sendMessage(ChatColor.RED + this.plugin.getMessage("give-items.need-positive"));
+                    ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("give-items.need-positive"));
                 else
                     giveItems(sender, targetPlayer, amount);
                 return true;
             } catch (NumberFormatException e) {
-                sender.sendMessage(ChatColor.RED + this.plugin.getMessage("give-items.invalid-number"));
+                ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("give-items.invalid-number"));
                 return false;
             }
         }
@@ -50,7 +53,7 @@ public class GiveSummonItemCommand implements CommandExecutor {
             inventory.addItem(plugin.getTriggerConfig().getDropInLavaConfig().getItem())
                     .forEach((index, item) -> receiver.getWorld().dropItem(receiver.getLocation(), item));
         }
-        requester.sendMessage(ChatColor.GREEN + String.format(this.plugin.getMessage("give-items.success"),
+        ChatColorUtil.send(requester, NamedTextColor.GREEN, String.format(this.plugin.getMessage("give-items.success"),
                 receiver.getName(), requestAmount, requestAmount == 1 ? "" : "s"));
     }
 }

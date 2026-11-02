@@ -5,11 +5,13 @@ import com.solarrabbit.largeraids.nms.AbstractRaidWrapper;
 import com.solarrabbit.largeraids.raid.LargeRaid;
 import com.solarrabbit.largeraids.raid.RaidManager;
 import com.solarrabbit.largeraids.raid.RaidersOutliner;
+import com.solarrabbit.largeraids.util.ChatColorUtil;
 import com.solarrabbit.largeraids.util.VersionUtil;
+
+import net.kyori.adventure.text.format.NamedTextColor;
 
 import java.util.Optional;
 
-import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Raid;
 import org.bukkit.command.Command;
@@ -31,29 +33,29 @@ public class OutlineRaidersCommand extends RaidersOutliner implements CommandExe
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!(sender instanceof Player)) {
-            sender.sendMessage(ChatColor.RED + this.plugin.getMessage("sender-player"));
+        if (!(sender instanceof Player player)) {
+            ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("sender-player"));
             return false;
         }
         if (args.length < 1)
             return false;
-        Location location = ((Player) sender).getLocation();
+        Location location = player.getLocation();
 
         try {
             int seconds = Integer.parseInt(args[0]);
             if (seconds <= 0) {
-                sender.sendMessage(ChatColor.RED + this.plugin.getMessage("outline-raiders.need-positive"));
+                ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("outline-raiders.need-positive"));
                 return false;
             } else {
                 Optional<Raid> optional = manager.getRaid(location);
                 if (optional.isEmpty())
-                    sender.sendMessage(ChatColor.RED + this.plugin.getMessage("outline-raiders.no-raid-exists"));
+                    ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("outline-raiders.no-raid-exists"));
                 else if (optional.get().getRaiders().isEmpty())
-                    sender.sendMessage(ChatColor.RED + this.plugin.getMessage("outline-raiders.no-raiders"));
+                    ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("outline-raiders.no-raiders"));
                 else {
                     resonateBell(location);
                     outlineAllRaidersImmediately(optional.get(), seconds * 20);
-                    sender.sendMessage(ChatColor.GREEN + String.format(this.plugin.getMessage("outline-raiders.raiders-outlined"),
+                    ChatColorUtil.send(sender, NamedTextColor.GREEN, String.format(this.plugin.getMessage("outline-raiders.raiders-outlined"),
                             seconds, seconds == 1 ? "" : "s"));
                 }
                 return true;
@@ -64,10 +66,10 @@ public class OutlineRaidersCommand extends RaidersOutliner implements CommandExe
                 if (largeRaid.isPresent()) {
                     if (largeRaid.get().areRaidersOutlined()) {
                         largeRaid.get().setRaidersOutlined(false);
-                        sender.sendMessage(ChatColor.GREEN + this.plugin.getMessage("outline-raiders.toggle-outlines-large-false"));
+                        ChatColorUtil.send(sender, NamedTextColor.GREEN, this.plugin.getMessage("outline-raiders.toggle-outlines-large-false"));
                     } else {
                         largeRaid.get().setRaidersOutlined(true);
-                        sender.sendMessage(ChatColor.GREEN + this.plugin.getMessage("outline-raiders.toggle-outlines-large-true"));
+                        ChatColorUtil.send(sender, NamedTextColor.GREEN, this.plugin.getMessage("outline-raiders.toggle-outlines-large-true"));
                     }
                     return true;
                 }
@@ -76,18 +78,17 @@ public class OutlineRaidersCommand extends RaidersOutliner implements CommandExe
                     AbstractRaidWrapper wrapper = VersionUtil.getCraftRaidWrapper(raid.get()).getHandle();
                     if (manager.outlinedRaids.contains(wrapper)) {
                         manager.outlinedRaids.remove(wrapper);
-                        sender.sendMessage(ChatColor.GREEN + this.plugin.getMessage("outline-raiders.toggle-outlines-false"));
+                        ChatColorUtil.send(sender, NamedTextColor.GREEN, this.plugin.getMessage("outline-raiders.toggle-outlines-false"));
                     } else {
                         manager.outlinedRaids.add(wrapper);
-                        sender.sendMessage(ChatColor.GREEN + this.plugin.getMessage("outline-raiders.toggle-outlines-true"));
+                        ChatColorUtil.send(sender, NamedTextColor.GREEN, this.plugin.getMessage("outline-raiders.toggle-outlines-true"));
                     }
                     return true;
                 }
-                sender.sendMessage(ChatColor.RED + this.plugin.getMessage("outline-raiders.no-raid-exists"));
+                ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("outline-raiders.no-raid-exists"));
                 return true;
             }
         }
         return false;
     }
-
 }

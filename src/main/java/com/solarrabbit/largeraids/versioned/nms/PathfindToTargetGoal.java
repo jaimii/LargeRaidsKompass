@@ -32,16 +32,17 @@ public class PathfindToTargetGoal extends Goal {
     @Override
     public boolean canUse() {
         if (this.mob.getTarget() == null
-            && !this.mob.hasControllingPassenger()
-            && targetPos != null) {
+                && !this.mob.hasControllingPassenger()
+                && targetPos != null) {
             if (isCloseToGoal()) {
                 if (runOnce) {
                     targetPos = null;
-                    mob.goalSelector.removeGoal(this);
+                    WorldServerWrapper.getGoalSelector(mob).removeGoal(this);
                     return false;
                 }
-            } else
+            } else {
                 return true;
+            }
         }
 
         return false;

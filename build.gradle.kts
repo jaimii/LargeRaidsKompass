@@ -7,20 +7,22 @@ plugins {
 }
 
 group = "com.solarrabbit"
-version = "1.12.0"
+version = "1.15.0"
 description = "LargeRaids"
-val mcVersion = "1.21.11"
+val mcVersion = "26.3"
 
-// Configure paperweight to output Mojang-mapped production artifacts
+// Configure paperweight to output Mojang-mapped production artifacts (default for unobfuscated 26.x+)
 paperweight {
   reobfArtifactConfiguration = io.papermc.paperweight.userdev.ReobfArtifactConfiguration.MOJANG_PRODUCTION
 }
 
 java {
-  toolchain.languageVersion.set(JavaLanguageVersion.of(21))
+  toolchain.languageVersion.set(JavaLanguageVersion.of(25))
 }
 
 repositories {
+  mavenCentral()
+  maven("https://repo.papermc.io/repository/maven-public/")
   maven("https://repo.helpch.at/releases/")
   maven("https://mvn.lumine.io/repository/maven-public/")
 }
@@ -37,10 +39,11 @@ tasks.withType<ShadowJar> {
 }
 
 dependencies {
-  paperweight.paperDevBundle(mcVersion + "-R0.1-SNAPSHOT")
+  // Paper 26.1+ uses the "<mcVersion>.build.+" dev bundle version format
+  paperweight.paperDevBundle("$mcVersion.build.+")
   shadow("org.bstats:bstats-bukkit:3.1.0")
-  implementation("me.clip:placeholderapi:2.12.2")
-  implementation("io.lumine:Mythic-Dist:5.11.2")
+  compileOnly("me.clip:placeholderapi:2.12.2")
+  compileOnly("io.lumine:Mythic-Dist:5.11.2")
 }
 
 tasks {
@@ -48,14 +51,14 @@ tasks {
     enabled = false
   }
 
-  // Bind the assemble task to shadowJar instead of reobfJar
+  // Bind the assemble task to shadowJar
   assemble {
     dependsOn(shadowJar)
   }
-
   compileJava {
     options.encoding = Charsets.UTF_8.name()
-    options.release.set(21)
+    options.release.set(25)
+    options.compilerArgs.addAll(listOf("-Xlint:unchecked", "-Xlint:deprecation"))
   }
   javadoc {
     options.encoding = Charsets.UTF_8.name()

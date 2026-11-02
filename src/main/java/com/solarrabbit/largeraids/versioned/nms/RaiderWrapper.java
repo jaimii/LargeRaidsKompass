@@ -6,6 +6,7 @@ import com.solarrabbit.largeraids.nms.AbstractRaiderWrapper;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.goal.GoalSelector;
 import net.minecraft.world.entity.ai.goal.PathfindToRaidGoal;
 import net.minecraft.world.entity.ai.goal.WrappedGoal;
 import net.minecraft.world.entity.ai.goal.target.NearestAttackableTargetGoal;
@@ -26,16 +27,17 @@ public class RaiderWrapper implements AbstractRaiderWrapper {
     @Override
     public void setRaiderTarget(AbstractBlockPositionWrapper pos, double radius, double navSpeed) {
         BlockPos blockPos = pos == null ? null : ((BlockPositionWrapper) pos).blockPos;
+        GoalSelector goalSelector = WorldServerWrapper.getGoalSelector(raider);
 
-        for (WrappedGoal goal : raider.goalSelector.getAvailableGoals()) {
+        for (WrappedGoal goal : goalSelector.getAvailableGoals()) {
             if (goal.getGoal().getClass() == PathfindToRaidGoal.class) {
                 int prio = goal.getPriority();
-                raider.goalSelector.removeGoal(goal.getGoal());
+                goalSelector.removeGoal(goal.getGoal());
                 RaiderPathfindToTargetGoal<Raider> newGoal = new RaiderPathfindToTargetGoal<>(raider);
                 newGoal.setTargetPos(blockPos, radius, navSpeed);
-                raider.goalSelector.addGoal(prio, newGoal);
+                goalSelector.addGoal(prio, newGoal);
                 break;
-            } else if (goal.getGoal() instanceof RaiderPathfindToTargetGoal raiderGoal) {
+            } else if (goal.getGoal() instanceof RaiderPathfindToTargetGoal<?> raiderGoal) {
                 raiderGoal.setTargetPos(blockPos, radius, navSpeed);
                 break;
             }
@@ -43,10 +45,11 @@ public class RaiderWrapper implements AbstractRaiderWrapper {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public boolean addAttackGoal(int prio, boolean mustSee, Class<?> entityClass) {
         if (!(LivingEntity.class.isAssignableFrom(entityClass)))
             return false;
-        raider.targetSelector.addGoal(prio, new NearestAttackableTargetGoal<>(raider, (Class<? extends LivingEntity>)entityClass, mustSee));
+        raider.targetSelector.addGoal(prio, new NearestAttackableTargetGoal<>(raider, (Class<? extends LivingEntity>) entityClass, mustSee));
         return true;
     }
 }

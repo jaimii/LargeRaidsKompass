@@ -1,107 +1,99 @@
-main: com.solarrabbit.largeraids.LargeRaids
 name: LargeRaids
 version: ${version}
-author: SolarRabbit
-api-version: 1.14
-
-softdepend: [PlaceholderAPI, MythicMobs, Multiverse-Core]
+main: com.solarrabbit.largeraids.LargeRaids
+api-version: '26.3'
+authors: [SolarRabbit, ThisTestUser, JustJaimii]
+description: Custom large raids with specialized illager variants and bosses.
+softdepend: [PlaceholderAPI, MythicMobs]
 
 commands:
-  lrreload:
-    description: Reloads LargeRaids plugin configurations.
-    permission: largeraids.reload
+  lregg:
+    description: Gives a custom raider spawn egg to a player.
+    usage: /<command> <player> <variant> [amount]
+    permission: largeraids.admin.giveegg
   lrstart:
-    description: Start a large raid at player location or given center.
-    usage: /<command> [player | center] [name]
+    description: Starts a large raid at a player or artificial village center.
+    usage: /<command> [player|center] [name]
     permission: largeraids.start
   lrskip:
-    description: Skip the current wave.
+    description: Skips the current wave of a large raid.
+    usage: /<command>
     permission: largeraids.skip
   lrstop:
-    description: Stops a large raid.
-    usage: /<command> [player | center] [name]
+    description: Stops an ongoing large raid.
+    usage: /<command> [player|center] [name]
     permission: largeraids.stop
+  lrshow:
+    description: Displays the current wave of an ongoing raid.
+    usage: /<command>
+    permission: largeraids.show
   lrgive:
-    description: Give a player the summoning item.
+    description: Gives the raid summon item to a player.
     usage: /<command> <player> [amount]
     permission: largeraids.give
+  lrreload:
+    description: Reloads the LargeRaids plugin configuration.
+    usage: /<command>
+    permission: largeraids.reload
   lrcenters:
-    description: Managing artificial villages.
-    usage: /<command> [add | remove | show | hide] [name]
+    description: Manages artificial village centers.
+    usage: /<command> [add|remove|show|hide] [name]
     permission: largeraids.centers
   lrglow:
-    description: Outlines all raiders in the current raid, either with an interval or permanently.
-    usage: /<command> toggle, /<command> [duration_seconds] 
+    description: Outlines raiders in an ongoing raid.
+    usage: /<command> <seconds|toggle>
     permission: largeraids.glow
-  lrshow:
-    description: Displays the current wave of the raid.
-    permission: largeraids.show
   lrattack:
-    description: Adds an entity type for current raiders to attack for this wave only.
-    usage: /<command> [prio] [target_thru_walls] [entity_class]
+    description: Adds an entity class to current raiders' attack targets.
+    usage: /<command> <priority> <throughWalls> <entityClass>
     permission: largeraids.attack
   lrconfig:
-    description: Configures some settings of the current large raid.
-    usage: /<command> spawn <x> <y> <z>, /<command> target <x> <y> <z> <radius> <navSpeed>, /<command> [spawn | target] clear
+    description: Configures custom spawn or target locations for an ongoing large raid.
+    usage: /<command> <spawn|target> [args...]
     permission: largeraids.config
   lrmobcontrol:
-    description: Makes the entity type in range of the player path-find to a given location. If pathfind_once is true, the target will be removed on arrival.
-    usage: /<command> <entity_class> <range_from_player> <x> <y> <z> <radius> <navSpeed> <prio> <pathfind_once>, /<command> <entity_class> <range_from_player> clear
+    description: Commands mobs in range to pathfind to a target location.
+    usage: /<command> <entityClass> <range> <clear|x y z radius navSpeed priority pathfindOnce>
     permission: largeraids.mobcontrol
-  lregg:
-    description: Gives custom spawn eggs for custom raid variants.
-    permission: largeraids.admin.giveegg
-    usage: /<command> <player> <variant> [amount]
 
 permissions:
-  largeraids.*:
-    description: Allow access to all LargeRaids commands.
+  largeraids.admin.*:
+    description: Grants access to all LargeRaids admin commands.
     default: op
     children:
-      largeraids.reload: true
+      largeraids.admin.giveegg: true
       largeraids.start: true
       largeraids.skip: true
       largeraids.stop: true
+      largeraids.show: true
       largeraids.give: true
+      largeraids.reload: true
       largeraids.centers: true
       largeraids.glow: true
-      largeraids.show: true
       largeraids.attack: true
       largeraids.config: true
       largeraids.mobcontrol: true
-  largeraids.reload:
-    description: Allow access to lrreload command.
+  largeraids.admin.giveegg:
     default: op
   largeraids.start:
-    description: Allow access to lrstart command.
     default: op
   largeraids.skip:
-    description: Allow access to lrskip command.
     default: op
   largeraids.stop:
-    description: Allow access to lrskip command.
-    default: op
-  largeraids.give:
-    description: Allow access to lrgive command.
-    default: op
-  largeraids.centers:
-    description: Allow access to lrcenters command.
-    default: op
-  largeraids.glow:
-    description: Allow access to lrglow command.
     default: op
   largeraids.show:
-    description: Allow access to lrshow command.
+    default: true
+  largeraids.give:
+    default: op
+  largeraids.reload:
+    default: op
+  largeraids.centers:
+    default: op
+  largeraids.glow:
     default: op
   largeraids.attack:
-    description: Allow access to lrattack command.
     default: op
   largeraids.config:
-    description: Allow access to lrconfig command.
     default: op
   largeraids.mobcontrol:
-    description: Allow access to lrmobcontrol command.
-    default: op
-  largeraids.admin.giveegg:
-    description: Allows admins to receive custom variant spawn eggs.
     default: op

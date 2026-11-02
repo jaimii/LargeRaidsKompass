@@ -6,6 +6,7 @@ import javax.annotation.Nullable;
 
 import com.solarrabbit.largeraids.LargeRaids;
 import com.solarrabbit.largeraids.event.LargeRaidTriggerEvent;
+import com.solarrabbit.largeraids.util.ChatColorUtil;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
@@ -25,6 +26,11 @@ public class TriggerManager implements Listener {
         this.lastTriggerer = triggerer;
     }
 
+    @Nullable
+    public CommandSender getLastTriggerer() {
+        return this.lastTriggerer;
+    }
+
     @EventHandler
     public void onLargeRaidTrigger(LargeRaidTriggerEvent evt) {
         if (plugin.getTriggerConfig().isArtificialOnly()) {
@@ -33,7 +39,10 @@ public class TriggerManager implements Listener {
                 evt.setCancelled(true);
                 return;
             }
-            Bukkit.broadcastMessage(plugin.getTriggerConfig().getBroadcastMessage(lastTriggerer, centerName));
+            String broadcast = plugin.getTriggerConfig().getBroadcastMessage(lastTriggerer, centerName);
+            if (broadcast != null && !broadcast.isEmpty()) {
+                Bukkit.broadcast(ChatColorUtil.parse(broadcast));
+            }
         }
     }
 
@@ -41,7 +50,7 @@ public class TriggerManager implements Listener {
     private String getCenterName(Location location) {
         return plugin.getDatabaseAdapter().getCentres().entrySet().stream()
                 .filter(entry -> location.getWorld().equals(entry.getValue().getWorld()))
-                .filter(entry -> entry.getValue().distanceSquared(location) < Math.pow(64, 2))
+                .filter(entry -> entry.getValue().distanceSquared(location) < 4096.0) // 64^2
                 .map(Entry::getKey)
                 .findFirst().orElse(null);
     }

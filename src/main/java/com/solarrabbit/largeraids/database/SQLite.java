@@ -13,9 +13,6 @@ import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.plugin.java.JavaPlugin;
 
-/**
- * SQLite implementation of accessing the task database.
- */
 public class SQLite extends Database {
     private static final String SQLITE_CREATE_VILLAGES_TABLE_STATEMENT = "CREATE TABLE IF NOT EXISTS "
             + VILLAGES_TABLE_NAME
@@ -28,7 +25,7 @@ public class SQLite extends Database {
 
     @Override
     public CompletableFuture<Connection> getSQLConnection() {
-        return CompletableFuture.supplyAsync(() -> this.createOrOpenDataFile()).thenApply(dataFile -> {
+        return CompletableFuture.supplyAsync(this::createOrOpenDataFile).thenApply(dataFile -> {
             try {
                 Class.forName("org.sqlite.JDBC");
                 return DriverManager.getConnection("jdbc:sqlite:" + dataFile);
@@ -42,10 +39,9 @@ public class SQLite extends Database {
     @Override
     public void load() {
         getSQLConnection().thenAccept(connection -> {
-            try {
-                Statement s = connection.createStatement();
+            if (connection == null) return;
+            try (Statement s = connection.createStatement()) {
                 s.executeUpdate(SQLITE_CREATE_VILLAGES_TABLE_STATEMENT);
-                s.close();
             } catch (SQLException ex) {
                 ex.printStackTrace();
             }
@@ -57,9 +53,13 @@ public class SQLite extends Database {
     public CompletableFuture<Map<String, Location>> getCentres() {
         Map<String, Location> centres = new HashMap<>();
         return getSQLConnection().thenApply(connection -> {
-            try {
-                PreparedStatement ps = connection.prepareStatement("SELECT * FROM " + VILLAGES_TABLE_NAME + ";");
-                ResultSet rs = ps.executeQuery();
+            if (connection == null) return centres;
+            try (Statement createStmt = connection.createStatement()) {
+                createStmt.executeUpdate(SQLITE_CREATE_VILLAGES_TABLE_STATEMENT);
+            } catch (SQLException ignored) {
+            }
+            try (PreparedStatement ps = connection.prepareStatement("SELECT * FROM " + VILLAGES_TABLE_NAME + ";");
+                 ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     String name = rs.getString("name");
                     World world = this.plugin.getServer().getWorld(rs.getString("world"));
@@ -69,11 +69,12 @@ public class SQLite extends Database {
                     Location location = new Location(world, x, y, z);
                     centres.put(name, location);
                 }
-                close(ps, connection);
                 return centres;
             } catch (SQLException ex) {
                 ex.printStackTrace();
                 return null;
+            } finally {
+                close(null, connection);
             }
         });
     }
@@ -81,15 +82,20 @@ public class SQLite extends Database {
     @Override
     public CompletableFuture<Void> addCentre(Location location, String name) {
         return getSQLConnection().thenAccept(connection -> {
-            try {
-                PreparedStatement ps = connection.prepareStatement("REPLACE INTO " + VILLAGES_TABLE_NAME
-                        + " (name, world, x, y, z) VALUES('" + name + "', '" + location.getWorld().getName() + "', "
-                        + location.getX() + ", " + location.getY() + ", " + location.getZ() + ");");
+            if (connection == null) return;
+            String sql = "REPLACE INTO " + VILLAGES_TABLE_NAME + " (name, world, x, y, z) VALUES(?, ?, ?, ?, ?);";
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                ps.setString(1, name);
+                ps.setString(2, location.getWorld().getName());
+                ps.setDouble(3, location.getX());
+                ps.setDouble(4, location.getY());
+                ps.setDouble(5, location.getZ());
                 ps.executeUpdate();
-                close(ps, connection);
             } catch (SQLException ex) {
                 ex.printStackTrace();
                 throw new RuntimeException(ex);
+            } finally {
+                close(null, connection);
             }
         });
     }
@@ -97,38 +103,42 @@ public class SQLite extends Database {
     @Override
     public CompletableFuture<Void> removeCentre(String name) {
         return getSQLConnection().thenAccept(connection -> {
-            try {
-                PreparedStatement ps = connection
-                        .prepareStatement("DELETE FROM " + VILLAGES_TABLE_NAME + " WHERE name = '" + name + "';");
+            if (connection == null) return;
+            String sql = "DELETE FROM " + VILLAGES_TABLE_NAME + " WHERE name = ?;";
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                ps.setString(1, name);
                 ps.executeUpdate();
-                close(ps, connection);
             } catch (SQLException ex) {
                 throw new RuntimeException(ex);
+            } finally {
+                close(null, connection);
             }
         });
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     public CompletableFuture<Location> getCentre(String name) {
         return getSQLConnection().thenApply(connection -> {
-            try {
-                Location location = null;
-                PreparedStatement ps = connection
-                        .prepareStatement("SELECT * FROM " + VILLAGES_TABLE_NAME + " WHERE name = '" + name + "';");
-                ResultSet rs = ps.executeQuery();
-                if (rs.next()) {
-                    World world = this.plugin.getServer().getWorld(rs.getString("world"));
-                    double x = rs.getDouble("x");
-                    double y = rs.getDouble("y");
-                    double z = rs.getDouble("z");
-                    location = new Location(world, x, y, z);
+            if (connection == null) return null;
+            String sql = "SELECT * FROM " + VILLAGES_TABLE_NAME + " WHERE name = ?;";
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                ps.setString(1, name);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        World world = this.plugin.getServer().getWorld(rs.getString("world"));
+                        double x = rs.getDouble("x");
+                        double y = rs.getDouble("y");
+                        double z = rs.getDouble("z");
+                        return new Location(world, x, y, z);
+                    }
                 }
-                close(ps, connection);
-                return location;
+                return null;
             } catch (SQLException ex) {
                 return null;
+            } finally {
+                close(null, connection);
             }
         });
     }
-
 }

@@ -27,8 +27,10 @@ public interface AbstractRaidWrapper {
 
     void setGroupsSpawned(int groupsSpawned);
 
+    int getTotalRaidersAlive();
+
     void joinRaid(int i, AbstractRaiderWrapper raider, @Nullable AbstractBlockPositionWrapper blockPosition,
-            boolean flag);
+                  boolean flag);
 
     boolean addWaveMob(int wave, AbstractRaiderWrapper raider, boolean flag);
 

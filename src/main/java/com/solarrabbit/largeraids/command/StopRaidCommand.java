@@ -3,11 +3,13 @@ package com.solarrabbit.largeraids.command;
 import com.solarrabbit.largeraids.LargeRaids;
 import com.solarrabbit.largeraids.raid.LargeRaid;
 import com.solarrabbit.largeraids.raid.RaidManager;
+import com.solarrabbit.largeraids.util.ChatColorUtil;
+
+import net.kyori.adventure.text.format.NamedTextColor;
 
 import java.util.Optional;
 
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -33,17 +35,17 @@ public class StopRaidCommand implements CommandExecutor {
                     Player player = Bukkit.getPlayer(args[1]);
                     location = player == null ? null : player.getLocation();
                     if (location == null) {
-                        sender.sendMessage(ChatColor.RED + this.plugin.getMessage("stop-raid.player-not-found"));
+                        ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("stop-raid.player-not-found"));
                         return false;
                     }
                     break;
                 case "center":
                     location = plugin.getDatabaseAdapter().getCentre(args[1]);
                     if (location == null) {
-                        sender.sendMessage(ChatColor.RED + this.plugin.getMessage("stop-raid.no-village-centers"));
+                        ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("stop-raid.no-village-centers"));
                         return false;
                     } else if (location.getWorld() == null) {
-                        sender.sendMessage(ChatColor.RED + this.plugin.getMessage("stop-raid.village-center-world-missing"));
+                        ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("stop-raid.village-center-world-missing"));
                         return false;
                     }
                     break;
@@ -52,31 +54,36 @@ public class StopRaidCommand implements CommandExecutor {
             }
             Optional<LargeRaid> raid = listener.getLargeRaid(location);
             if (raid.isPresent()) {
+                listener.setIdle();
                 raid.get().stopRaid();
+                listener.setActive();
                 listener.currentRaids.remove(raid.get());
-                sender.sendMessage(ChatColor.GREEN + String.format(this.plugin.getMessage("stop-raid.stopped-raid"),
+                listener.saveRaids();
+                ChatColorUtil.send(sender, NamedTextColor.GREEN, String.format(this.plugin.getMessage("stop-raid.stopped-raid"),
                         location.getBlockX(), location.getBlockY(), location.getBlockZ()));
-            } else
-                sender.sendMessage(ChatColor.RED + String.format(this.plugin.getMessage("stop-raid.no-large-raid"),
+            } else {
+                ChatColorUtil.send(sender, NamedTextColor.RED, String.format(this.plugin.getMessage("stop-raid.no-large-raid"),
                         location.getBlockX(), location.getBlockY(), location.getBlockZ()));
+            }
             return true;
-        } else if (sender instanceof Player) {
-            Player player = (Player) sender;
+        } else if (sender instanceof Player player) {
             Location location = player.getLocation();
             Optional<LargeRaid> raid = listener.getLargeRaid(location);
             if (raid.isPresent()) {
+                listener.setIdle();
                 raid.get().stopRaid();
+                listener.setActive();
                 listener.currentRaids.remove(raid.get());
-                sender.sendMessage(ChatColor.GREEN + String.format(this.plugin.getMessage("stop-raid.stopped-raid"),
+                listener.saveRaids();
+                ChatColorUtil.send(sender, NamedTextColor.GREEN, String.format(this.plugin.getMessage("stop-raid.stopped-raid"),
                         location.getBlockX(), location.getBlockY(), location.getBlockZ()));
-            } else
-                sender.sendMessage(ChatColor.RED + String.format(this.plugin.getMessage("stop-raid.no-large-raid"),
+            } else {
+                ChatColorUtil.send(sender, NamedTextColor.RED, String.format(this.plugin.getMessage("stop-raid.no-large-raid"),
                         location.getBlockX(), location.getBlockY(), location.getBlockZ()));
+            }
             return true;
         }
-        if (!(sender instanceof Player))
-            sender.sendMessage(ChatColor.RED + this.plugin.getMessage("stop-raid.specify-player"));
+        ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("stop-raid.specify-player"));
         return false;
     }
-
 }

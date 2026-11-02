@@ -2,7 +2,7 @@ package com.solarrabbit.largeraids.versioned.nms;
 
 import com.solarrabbit.largeraids.nms.AbstractCraftVexWrapper;
 
-import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.Entity;
 
 import org.bukkit.craftbukkit.entity.CraftVex;
 import org.bukkit.entity.LivingEntity;
@@ -17,7 +17,7 @@ public class CraftVexWrapper implements AbstractCraftVexWrapper {
 
     @Override
     public LivingEntity getOwner() {
-        Mob owner = ((CraftVex) vex).getHandle().getOwner();
+        Entity owner = ((CraftVex) this.vex).getHandle().getOwner();
         return owner == null ? null : (LivingEntity) owner.getBukkitEntity();
     }
 }

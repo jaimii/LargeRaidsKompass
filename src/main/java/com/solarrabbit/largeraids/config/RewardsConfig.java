@@ -20,15 +20,16 @@ public class RewardsConfig {
     public RewardsConfig(ConfigurationSection config) {
         message = config.getString("message", null);
         ConfigurationSection itemsConfig = config.getConfigurationSection("items");
-        items = itemsConfig.getKeys(false).stream()
+        items = itemsConfig == null ? new ItemStack[0]
+                : itemsConfig.getKeys(false).stream()
                 .map(key -> ItemCreator.getItemFromConfig(itemsConfig.getConfigurationSection(key)))
                 .toArray(ItemStack[]::new);
         commands = config.getStringList("commands").toArray(new String[0]);
         minRaiderKills = config.getInt("min-raider-kills");
         minDamageDeal = config.getDouble("min-damage-deal");
         ConfigurationSection heroConfig = config.getConfigurationSection("hero-of-the-village");
-        heroLevel = heroConfig.getInt("level");
-        heroDuration = heroConfig.getInt("duration");
+        heroLevel = heroConfig != null ? heroConfig.getInt("level") : 0;
+        heroDuration = heroConfig != null ? heroConfig.getInt("duration") : 0;
     }
 
     @Nullable

@@ -3,9 +3,14 @@ package com.solarrabbit.largeraids.raid.mob.manager;
 import com.solarrabbit.largeraids.LargeRaids;
 import com.solarrabbit.largeraids.config.custommobs.CustomMobsConfig;
 import com.solarrabbit.largeraids.raid.mob.Bomber;
+import com.solarrabbit.largeraids.util.ChatColorUtil;
 import com.solarrabbit.largeraids.util.VersionUtil;
 
-import org.bukkit.ChatColor;
+import io.papermc.paper.datacomponent.DataComponentTypes;
+import io.papermc.paper.datacomponent.item.TooltipDisplay;
+
+import net.kyori.adventure.text.Component;
+
 import org.bukkit.DyeColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -23,23 +28,41 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.entity.EntitySpawnEvent;
-import org.bukkit.event.entity.EntityDamageEvent.DamageCause;
 import org.bukkit.inventory.EntityEquipment;
-import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.BannerMeta;
-import org.bukkit.persistence.PersistentDataContainer;
 import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public class BomberManager implements CustomRaiderManager, Listener {
+    private static final int DEATH_XP_POINTS = getXpForLevel(15);
+    private static final Component BOMBER_NAME = ChatColorUtil.parse("<red>Rampart");
+    private static final Component VEX_NAME = ChatColorUtil.parse("<red>Drone Vex");
+
+    private final LargeRaids plugin;
+    private final NamespacedKey bomberKey;
+    private final NamespacedKey vexKey;
+    private final NamespacedKey tntKey;
+    private final ItemStack bannerTemplate;
+    private final ItemStack tntItemTemplate;
+
     private float bomberExplosivePower;
     private float tntExplosivePower;
     private int primedTntTicks;
     private boolean tntBreakBlocks;
+
+    public BomberManager() {
+        this.plugin = JavaPlugin.getPlugin(LargeRaids.class);
+        this.bomberKey = new NamespacedKey(plugin, "bomber");
+        this.vexKey = new NamespacedKey(plugin, "bomber_vex");
+        this.tntKey = new NamespacedKey(plugin, "bomber_vex_tnt");
+        this.bannerTemplate = createDefaultBanner();
+        this.tntItemTemplate = new ItemStack(Material.TNT);
+    }
 
     @Override
     public void loadSettings(CustomMobsConfig config) {
@@ -53,13 +76,17 @@ public class BomberManager implements CustomRaiderManager, Listener {
     public Bomber spawn(Location location) {
         Spellcaster evoker = (Spellcaster) location.getWorld().spawnEntity(location, EntityType.EVOKER);
         EntityEquipment equipment = evoker.getEquipment();
-        equipment.setHelmet(getDefaultBanner());
-        equipment.setHelmetDropChance(1.0f);
+        if (equipment != null) {
+            equipment.setHelmet(bannerTemplate.clone());
+            equipment.setHelmetDropChance(1.0f);
+        }
 
         evoker.setPatrolLeader(true);
+        evoker.getPersistentDataContainer().set(bomberKey, PersistentDataType.BYTE, (byte) 0);
+        evoker.customName(BOMBER_NAME);
 
-        evoker.getPersistentDataContainer().set(getBomberNamespacedKey(), PersistentDataType.BYTE, (byte) 0);
-        evoker.setCustomName("§cRampart");
+        EvokerGoalUtil.injectRaidFleeGoal(evoker, location);
+
         return new Bomber(evoker);
     }
 
@@ -69,7 +96,7 @@ public class BomberManager implements CustomRaiderManager, Listener {
             return;
         EvokerFangs fangs = (EvokerFangs) evt.getEntity();
         LivingEntity owner = fangs.getOwner();
-        if (owner instanceof Spellcaster && isBomber((Spellcaster) owner)) {
+        if (owner instanceof Spellcaster evoker && isBomber(evoker)) {
             evt.setCancelled(true);
             fangs.getWorld().createExplosion(fangs.getLocation(), bomberExplosivePower, false, tntBreakBlocks, owner);
         }
@@ -94,12 +121,12 @@ public class BomberManager implements CustomRaiderManager, Listener {
             return;
         Vex vex = (Vex) evt.getEntity();
         LivingEntity owner = VersionUtil.getCraftVexWrapper(vex).getOwner();
-        if (!(owner instanceof Spellcaster))
-            return;
-        if (isBomber((Spellcaster) owner)) {
-            vex.getPersistentDataContainer().set(getVexNamespacedKey(), PersistentDataType.BYTE, (byte) 0);
-            vex.getEquipment().setItemInMainHand(new ItemStack(Material.TNT));
-            vex.setCustomName("§cDrone Vex");
+        if (owner instanceof Spellcaster evoker && isBomber(evoker)) {
+            vex.getPersistentDataContainer().set(vexKey, PersistentDataType.BYTE, (byte) 0);
+            if (vex.getEquipment() != null) {
+                vex.getEquipment().setItemInMainHand(tntItemTemplate.clone());
+            }
+            vex.customName(VEX_NAME);
         }
     }
 
@@ -113,7 +140,7 @@ public class BomberManager implements CustomRaiderManager, Listener {
         evt.setCancelled(true);
         TNTPrimed tnt = (TNTPrimed) damager.getWorld().spawnEntity(damager.getLocation(), EntityType.TNT);
         tnt.setFuseTicks(primedTntTicks);
-        tnt.getPersistentDataContainer().set(getTNTNamespacedKey(), PersistentDataType.BYTE, (byte) 0);
+        tnt.getPersistentDataContainer().set(tntKey, PersistentDataType.BYTE, (byte) 0);
     }
 
     @EventHandler
@@ -132,7 +159,7 @@ public class BomberManager implements CustomRaiderManager, Listener {
         if (evt.getDamager().getType() != EntityType.TNT)
             return;
         TNTPrimed tnt = (TNTPrimed) evt.getDamager();
-        if (!(isVexTNT(tnt)))
+        if (!isVexTNT(tnt))
             return;
         evt.setCancelled(true);
     }
@@ -143,11 +170,11 @@ public class BomberManager implements CustomRaiderManager, Listener {
             return;
         Spellcaster evoker = (Spellcaster) evt.getEntity();
         if (isBomber(evoker)) {
-            evt.setDroppedExp(getXpForLevel(15));
+            evt.setDroppedExp(DEATH_XP_POINTS);
         }
     }
 
-    private int getXpForLevel(int level) {
+    private static int getXpForLevel(int level) {
         if (level <= 16) {
             return level * level + 6 * level;
         } else if (level <= 31) {
@@ -157,46 +184,34 @@ public class BomberManager implements CustomRaiderManager, Listener {
         }
     }
 
-    private ItemStack getDefaultBanner() {
+    private static ItemStack createDefaultBanner() {
         ItemStack banner = new ItemStack(Material.LIGHT_GRAY_BANNER);
         BannerMeta meta = (BannerMeta) banner.getItemMeta();
-        meta.addPattern(new Pattern(DyeColor.ORANGE, PatternType.RHOMBUS));
-        meta.addPattern(new Pattern(DyeColor.YELLOW, PatternType.FLOWER));
-        meta.addPattern(new Pattern(DyeColor.LIGHT_GRAY, PatternType.DIAGONAL_UP_LEFT));
-        meta.addPattern(new Pattern(DyeColor.LIGHT_GRAY, PatternType.DIAGONAL_RIGHT));
-        meta.addPattern(new Pattern(DyeColor.RED, PatternType.GRADIENT_UP));
-        meta.addPattern(new Pattern(DyeColor.BLACK, PatternType.CIRCLE));
-        meta.addPattern(new Pattern(DyeColor.BLACK, PatternType.BORDER));
-        meta.addItemFlags(ItemFlag.HIDE_ADDITIONAL_TOOLTIP);
-        meta.setDisplayName(ChatColor.GOLD.toString() + ChatColor.ITALIC + "§cRampart Banner");
-        banner.setItemMeta(meta);
+        if (meta != null) {
+            meta.addPattern(new Pattern(DyeColor.ORANGE, PatternType.RHOMBUS));
+            meta.addPattern(new Pattern(DyeColor.YELLOW, PatternType.FLOWER));
+            meta.addPattern(new Pattern(DyeColor.LIGHT_GRAY, PatternType.DIAGONAL_UP_LEFT));
+            meta.addPattern(new Pattern(DyeColor.LIGHT_GRAY, PatternType.DIAGONAL_RIGHT));
+            meta.addPattern(new Pattern(DyeColor.RED, PatternType.GRADIENT_UP));
+            meta.addPattern(new Pattern(DyeColor.BLACK, PatternType.CIRCLE));
+            meta.addPattern(new Pattern(DyeColor.BLACK, PatternType.BORDER));
+            meta.displayName(ChatColorUtil.parseItem("<gold><italic><red>Rampart Banner"));
+            banner.setItemMeta(meta);
+        }
+        banner.setData(DataComponentTypes.TOOLTIP_DISPLAY,
+                TooltipDisplay.tooltipDisplay().addHiddenComponents(DataComponentTypes.BANNER_PATTERNS).build());
         return banner;
     }
 
     private boolean isBomber(Spellcaster entity) {
-        PersistentDataContainer pdc = entity.getPersistentDataContainer();
-        return pdc.has(getBomberNamespacedKey(), PersistentDataType.BYTE);
+        return entity.getPersistentDataContainer().has(bomberKey, PersistentDataType.BYTE);
     }
 
     private boolean isBomberVex(Vex entity) {
-        PersistentDataContainer pdc = entity.getPersistentDataContainer();
-        return pdc.has(getVexNamespacedKey(), PersistentDataType.BYTE);
+        return entity.getPersistentDataContainer().has(vexKey, PersistentDataType.BYTE);
     }
 
     private boolean isVexTNT(TNTPrimed entity) {
-        PersistentDataContainer pdc = entity.getPersistentDataContainer();
-        return pdc.has(getTNTNamespacedKey(), PersistentDataType.BYTE);
-    }
-
-    private NamespacedKey getBomberNamespacedKey() {
-        return new NamespacedKey(JavaPlugin.getPlugin(LargeRaids.class), "bomber");
-    }
-
-    private NamespacedKey getVexNamespacedKey() {
-        return new NamespacedKey(JavaPlugin.getPlugin(LargeRaids.class), "bomber_vex");
-    }
-
-    private NamespacedKey getTNTNamespacedKey() {
-        return new NamespacedKey(JavaPlugin.getPlugin(LargeRaids.class), "bomber_vex_tnt");
+        return entity.getPersistentDataContainer().has(tntKey, PersistentDataType.BYTE);
     }
 }

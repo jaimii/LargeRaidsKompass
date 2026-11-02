@@ -1,8 +1,8 @@
 package com.solarrabbit.largeraids.command;
 
+import com.solarrabbit.largeraids.util.ChatColorUtil;
 import com.solarrabbit.largeraids.util.CustomEggUtil;
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.NamedTextColor;
+
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -22,18 +22,18 @@ public class GiveEggCommand implements CommandExecutor {
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
         if (!sender.hasPermission("largeraids.admin.giveegg")) {
-            sender.sendMessage(Component.text("You do not have permission to execute this command.", NamedTextColor.RED));
+            ChatColorUtil.send(sender, "<red>You do not have permission to execute this command.");
             return true;
         }
 
         if (args.length < 2) {
-            sender.sendMessage(Component.text("Usage: /" + label + " <player> <variant> [amount]", NamedTextColor.RED));
+            ChatColorUtil.send(sender, "<red>Usage: /" + label + " <player> <variant> [amount]");
             return true;
         }
 
         Player target = Bukkit.getPlayer(args[0]);
         if (target == null) {
-            sender.sendMessage(Component.text("Player not found: " + args[0], NamedTextColor.RED));
+            ChatColorUtil.send(sender, "<red>Player not found: " + args[0]);
             return true;
         }
 
@@ -42,20 +42,25 @@ public class GiveEggCommand implements CommandExecutor {
         if (args.length >= 3) {
             try {
                 amount = Integer.parseInt(args[2]);
+                if (amount <= 0) {
+                    ChatColorUtil.send(sender, "<red>Amount must be a positive number.");
+                    return true;
+                }
             } catch (NumberFormatException e) {
-                sender.sendMessage(Component.text("Invalid amount: " + args[2], NamedTextColor.RED));
+                ChatColorUtil.send(sender, "<red>Invalid amount: " + args[2]);
                 return true;
             }
         }
 
         ItemStack egg = eggUtil.createCustomSpawnEgg(variant, amount);
         if (egg == null) {
-            sender.sendMessage(Component.text("Unknown variant: " + variant, NamedTextColor.RED));
+            ChatColorUtil.send(sender, "<red>Unknown variant: " + variant);
             return true;
         }
 
-        target.getInventory().addItem(egg);
-        sender.sendMessage(Component.text("Gave " + amount + "x " + variant + " spawn egg to " + target.getName() + ".", NamedTextColor.GREEN));
+        target.getInventory().addItem(egg)
+                .forEach((index, leftover) -> target.getWorld().dropItem(target.getLocation(), leftover));
+        ChatColorUtil.send(sender, "<green>Gave " + amount + "x " + variant + " spawn egg to " + target.getName() + ".");
         return true;
     }
 }
