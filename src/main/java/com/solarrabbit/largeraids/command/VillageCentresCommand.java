@@ -26,7 +26,7 @@ import org.bukkit.entity.Player;
 public class VillageCentresCommand implements CommandExecutor {
     private static final double SPHERE_RADIUS = 96.0;
     private static final double VIEW_DISTANCE_SQ = 256.0 * 256.0;
-    private static final DustOptions DUST_OPTIONS = new DustOptions(Color.ORANGE, 200.0F);
+    private static final DustOptions DUST_OPTIONS = new DustOptions(Color.ORANGE, 4.0F);
     private static final double[][] SPHERE_OFFSETS;
 
     static {
