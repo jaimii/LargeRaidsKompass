@@ -439,7 +439,7 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
         vindicator.setHealth(health);
 
         vindicator.getAttribute(Attribute.ARMOR).setBaseValue(8.0);
-        vindicator.setRemoveWhenFarAway(false);
+        vindicator.setPersistenceRequired(true);
 
         EntityEquipment equipment = vindicator.getEquipment();
         if (equipment != null) {
@@ -476,7 +476,7 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
 
         horse.setTamed(true);
         horse.customName(STEED_NAME);
-        horse.setRemoveWhenFarAway(false);
+        horse.setPersistenceRequired(true);
         horse.getPersistentDataContainer().set(adjudicatorKey, PersistentDataType.BYTE, (byte) 0);
 
         Vindicator vindicator = (Vindicator) location.getWorld().spawnEntity(location, EntityType.VINDICATOR);
@@ -490,7 +490,7 @@ public class AdjudicatorManager implements CustomRaiderManager, Listener {
         vindicator.setHealth(health);
 
         vindicator.getAttribute(Attribute.ARMOR).setBaseValue(8.0);
-        vindicator.setRemoveWhenFarAway(false);
+        vindicator.setPersistenceRequired(true);
 
         EntityEquipment equipment = vindicator.getEquipment();
         if (equipment != null) {

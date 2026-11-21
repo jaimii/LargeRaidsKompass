@@ -181,7 +181,7 @@ public class ArchIllagerManager implements BossRaiderManager, Listener {
         ravager.getAttribute(Attribute.MAX_HEALTH).setBaseValue(ravagerHealth);
         ravager.getAttribute(Attribute.ATTACK_DAMAGE).setBaseValue(ravagerDamage);
         ravager.setHealth(ravagerHealth);
-        ravager.setRemoveWhenFarAway(false);
+        ravager.setPersistenceRequired(true);
 
         PersistentDataContainer ravagerPdc = ravager.getPersistentDataContainer();
         ravagerPdc.set(juggernautKey, PersistentDataType.BYTE, (byte) 0);
@@ -194,7 +194,7 @@ public class ArchIllagerManager implements BossRaiderManager, Listener {
         Illusioner arch = (Illusioner) world.spawnEntity(location, EntityType.ILLUSIONER);
         arch.customName(ARCH_ILLAGER_NAME);
         arch.setCustomNameVisible(true);
-        arch.setRemoveWhenFarAway(false);
+        arch.setPersistenceRequired(true);;
 
         AttributeInstance maxHealthAttr = arch.getAttribute(Attribute.MAX_HEALTH);
         if (maxHealthAttr != null) {
@@ -792,7 +792,7 @@ public class ArchIllagerManager implements BossRaiderManager, Listener {
                 clone.setCustomNameVisible(true);
                 clone.setGlowing(true);
                 clone.setPatrolLeader(true);
-                clone.setRemoveWhenFarAway(false);
+                clone.setPersistenceRequired(true);
 
                 EntityEquipment equip = clone.getEquipment();
                 if (equip != null) {
