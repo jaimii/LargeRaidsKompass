@@ -26,9 +26,8 @@ public class EvokerGoalUtil {
     static {
         MethodHandle getter = null;
         try {
-            Field f = Mob.class.getDeclaredField("goalSelector");
-            f.setAccessible(true);
-            getter = MethodHandles.lookup().unreflectGetter(f);
+            getter = MethodHandles.privateLookupIn(Mob.class, MethodHandles.lookup())
+                    .findGetter(Mob.class, "goalSelector", GoalSelector.class);
         } catch (ReflectiveOperationException e) {
             e.printStackTrace();
         }

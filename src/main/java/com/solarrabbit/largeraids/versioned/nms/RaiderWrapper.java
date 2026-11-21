@@ -45,11 +45,16 @@ public class RaiderWrapper implements AbstractRaiderWrapper {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public boolean addAttackGoal(int prio, boolean mustSee, Class<?> entityClass) {
-        if (!(LivingEntity.class.isAssignableFrom(entityClass)))
+        if (!org.bukkit.entity.LivingEntity.class.isAssignableFrom(entityClass)
+                && !LivingEntity.class.isAssignableFrom(entityClass))
             return false;
-        raider.targetSelector.addGoal(prio, new NearestAttackableTargetGoal<>(raider, (Class<? extends LivingEntity>) entityClass, mustSee));
+        raider.targetSelector.addGoal(prio, new NearestAttackableTargetGoal<>(
+                raider,
+                LivingEntity.class,
+                mustSee,
+                (target, level) -> entityClass.isInstance(target) || entityClass.isInstance(target.getBukkitEntity())
+        ));
         return true;
     }
 }

@@ -80,7 +80,6 @@ import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.util.Vector;
 
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -99,12 +98,12 @@ public class ArchIllagerManager implements BossRaiderManager, Listener {
     private static final double PHASE_3_4_FANG_DAMAGE = 8.0; // 4 hearts (ignores armor)
     private static final double PHASE_3_EXPLOSION_DAMAGE = 5.0;  // First transition armor-ignoring damage
     private static final double PHASE_4_EXPLOSION_DAMAGE = 10.0; // Last transition armor-ignoring damage
+    private static final double GOLEM_EXPLOSION_DAMAGE = 100.0;  // Transition explosion damage to Iron Golems
     private static final double EXPLOSION_RADIUS = 10.0;
     private static final int FANG_FIRE_TICKS = 100;
     private static final int DEATH_XP_POINTS = getXpForLevel(100);
     private static final Component ARCH_ILLAGER_NAME = ChatColorUtil.parse("<blue><bold>Arch-Illager");
     private static final Component JUGGERNAUT_NAME = ChatColorUtil.parse("<blue>Juggernaut <dark_blue>Ravager");
-    private static volatile Field spellCastingTickCountField;
 
     private final LargeRaids plugin;
     private final NamespacedKey archKey;
@@ -399,7 +398,6 @@ public class ArchIllagerManager implements BossRaiderManager, Listener {
     private void playSpellCastAnimation(Illusioner illusioner, Spellcaster.Spell spell, int durationTicks) {
         if (illusioner == null || illusioner.isDead() || !illusioner.isValid()) return;
         illusioner.setSpell(spell);
-        setNmsSpellCastingTicks(illusioner, durationTicks);
         illusioner.swingOffHand();
 
         Bukkit.getScheduler().runTaskLater(plugin, () -> {
@@ -407,27 +405,6 @@ public class ArchIllagerManager implements BossRaiderManager, Listener {
                 illusioner.setSpell(Spellcaster.Spell.NONE);
             }
         }, durationTicks);
-    }
-
-    private void setNmsSpellCastingTicks(Illusioner illusioner, int ticks) {
-        try {
-            net.minecraft.world.entity.raid.Raider nms = ((CraftRaider) illusioner).getHandle();
-            if (spellCastingTickCountField == null) {
-                Class<?> c = nms.getClass();
-                while (c != null && spellCastingTickCountField == null) {
-                    try {
-                        Field f = c.getDeclaredField("spellCastingTickCount");
-                        f.setAccessible(true);
-                        spellCastingTickCountField = f;
-                    } catch (NoSuchFieldException e) {
-                        c = c.getSuperclass();
-                    }
-                }
-            }
-            if (spellCastingTickCountField != null) {
-                spellCastingTickCountField.setInt(nms, ticks);
-            }
-        } catch (Exception ignored) {}
     }
 
     private void startPhase2(Illusioner arch) {
@@ -475,7 +452,6 @@ public class ArchIllagerManager implements BossRaiderManager, Listener {
                 ? Spellcaster.Spell.BLINDNESS
                 : Spellcaster.Spell.SUMMON_VEX;
         arch.setSpell(transitionSpell);
-        setNmsSpellCastingTicks(arch, 120);
 
         final Location baseLoc = arch.getLocation().clone();
         final World world = baseLoc.getWorld();
@@ -505,7 +481,6 @@ public class ArchIllagerManager implements BossRaiderManager, Listener {
 
                 if (step <= totalRegenSteps) {
                     arch.setSpell(transitionSpell);
-                    setNmsSpellCastingTicks(arch, 20);
 
                     double hoverHeight = Math.min(3.8, (3.8 * step) / totalRegenSteps);
                     Location hoverLoc = baseLoc.clone().add(0, hoverHeight, 0);
@@ -679,20 +654,19 @@ public class ArchIllagerManager implements BossRaiderManager, Listener {
 
         double radiusSq = EXPLOSION_RADIUS * EXPLOSION_RADIUS;
 
-        for (Entity entity : world.getNearbyEntities(loc, EXPLOSION_RADIUS, 8.0, EXPLOSION_RADIUS)) {
+        for (Entity entity : world.getNearbyEntities(loc, EXPLOSION_RADIUS, 6.0, EXPLOSION_RADIUS)) {
             if (entity instanceof LivingEntity living && isValidHostileTarget(living)) {
                 double dx = living.getLocation().getX() - loc.getX();
                 double dz = living.getLocation().getZ() - loc.getZ();
                 if (dx * dx + dz * dz > radiusSq)
                     continue;
 
-                // Deal 100 damage (ignoring armor) to Iron Golems, and standard transition damage to other targets
-                double finalDamage = (living instanceof IronGolem) ? 100.0 : armorBypassingDamage;
+                double finalDamage = (living instanceof IronGolem) ? GOLEM_EXPLOSION_DAMAGE : armorBypassingDamage;
                 living.damage(finalDamage, magicSource);
 
                 Vector kb = new Vector(dx, 0, dz);
                 if (kb.lengthSquared() == 0) {
-                    kb = new Vector(5, 2, 0);
+                    kb = new Vector(1, 0, 0);
                 } else {
                     kb.normalize();
                 }
@@ -711,7 +685,6 @@ public class ArchIllagerManager implements BossRaiderManager, Listener {
         arch.setGravity(false);
         arch.setGlowing(true);
         arch.setSpell(Spellcaster.Spell.SUMMON_VEX);
-        setNmsSpellCastingTicks(arch, 100);
 
         final Location baseLoc = arch.getLocation().clone();
         final World world = baseLoc.getWorld();
@@ -734,7 +707,6 @@ public class ArchIllagerManager implements BossRaiderManager, Listener {
 
                 if (step <= 20) {
                     arch.setSpell(Spellcaster.Spell.SUMMON_VEX);
-                    setNmsSpellCastingTicks(arch, 20);
 
                     double hoverHeight = Math.min(3.5, step * 0.2);
                     Location hoverLoc = baseLoc.clone().add(0, hoverHeight, 0);
@@ -1511,7 +1483,7 @@ public class ArchIllagerManager implements BossRaiderManager, Listener {
             meta.addPattern(new Pattern(DyeColor.CYAN, PatternType.SKULL));
             meta.addPattern(new Pattern(DyeColor.WHITE, PatternType.TRIANGLE_TOP));
             meta.addPattern(new Pattern(DyeColor.BLUE, PatternType.BORDER));
-            meta.displayName(ChatColorUtil.parseItem("<blue><bold>The Arch-Illager Banner"));
+            meta.displayName(ChatColorUtil.parseItem("<blue><bold>Arch-Illager Standard"));
             banner.setItemMeta(meta);
         }
         banner.setData(DataComponentTypes.TOOLTIP_DISPLAY,

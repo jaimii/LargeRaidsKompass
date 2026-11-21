@@ -2,7 +2,6 @@ package com.solarrabbit.largeraids.versioned.nms;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
-import java.lang.reflect.Field;
 import java.util.List;
 
 import com.solarrabbit.largeraids.nms.AbstractBlockPositionWrapper;
@@ -21,9 +20,8 @@ public class WorldServerWrapper implements AbstractWorldServerWrapper {
     static {
         MethodHandle getter = null;
         try {
-            Field f = Mob.class.getDeclaredField("goalSelector");
-            f.setAccessible(true);
-            getter = MethodHandles.lookup().unreflectGetter(f);
+            getter = MethodHandles.privateLookupIn(Mob.class, MethodHandles.lookup())
+                    .findGetter(Mob.class, "goalSelector", GoalSelector.class);
         } catch (ReflectiveOperationException e) {
             e.printStackTrace();
         }
@@ -45,15 +43,16 @@ public class WorldServerWrapper implements AbstractWorldServerWrapper {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public int clearMobTargets(Class<?> entityClass, AbstractBlockPositionWrapper search, double range) {
-        if (!(Mob.class.isAssignableFrom(entityClass)))
+        if (!org.bukkit.entity.Mob.class.isAssignableFrom(entityClass)
+                && !Mob.class.isAssignableFrom(entityClass))
             return -1;
 
         BlockPos searchPos = ((BlockPositionWrapper) search).blockPos;
         AABB aabb = new AABB(searchPos.getX() - range, searchPos.getY() - range, searchPos.getZ() - range,
                 searchPos.getX() + range, searchPos.getY() + range, searchPos.getZ() + range);
-        List<? extends Mob> mobs = server.getEntitiesOfClass((Class<? extends Mob>) entityClass, aabb);
+        List<Mob> mobs = server.getEntitiesOfClass(Mob.class, aabb,
+                mob -> entityClass.isInstance(mob) || entityClass.isInstance(mob.getBukkitEntity()));
         int count = 0;
         for (Mob mob : mobs) {
             GoalSelector goalSelector = getGoalSelector(mob);
@@ -70,16 +69,17 @@ public class WorldServerWrapper implements AbstractWorldServerWrapper {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public int setMobTargets(Class<?> entityClass, AbstractBlockPositionWrapper search, double range,
                              AbstractBlockPositionWrapper target, double radius, double navSpeed, int prio, boolean pathfindOnce) {
-        if (!(Mob.class.isAssignableFrom(entityClass)))
+        if (!org.bukkit.entity.Mob.class.isAssignableFrom(entityClass)
+                && !Mob.class.isAssignableFrom(entityClass))
             return -1;
 
         BlockPos searchPos = ((BlockPositionWrapper) search).blockPos;
         AABB aabb = new AABB(searchPos.getX() - range, searchPos.getY() - range, searchPos.getZ() - range,
                 searchPos.getX() + range, searchPos.getY() + range, searchPos.getZ() + range);
-        List<? extends Mob> mobs = server.getEntitiesOfClass((Class<? extends Mob>) entityClass, aabb);
+        List<Mob> mobs = server.getEntitiesOfClass(Mob.class, aabb,
+                mob -> entityClass.isInstance(mob) || entityClass.isInstance(mob.getBukkitEntity()));
         for (Mob mob : mobs) {
             GoalSelector goalSelector = getGoalSelector(mob);
             for (WrappedGoal goal : goalSelector.getAvailableGoals()) {

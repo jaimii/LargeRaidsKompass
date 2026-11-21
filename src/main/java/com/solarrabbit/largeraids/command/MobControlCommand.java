@@ -34,10 +34,8 @@ public class MobControlCommand implements CommandExecutor {
         if (args.length < 3)
             return false;
 
-        Class<?> entityClass;
-        try {
-            entityClass = Class.forName(args[0]);
-        } catch (ClassNotFoundException e) {
+        Class<?> entityClass = RaiderAttackCommand.resolveEntityClass(args[0]);
+        if (entityClass == null) {
             ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("mob-control.class-not-found"));
             return false;
         }

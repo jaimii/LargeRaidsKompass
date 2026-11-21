@@ -7,13 +7,22 @@ import com.solarrabbit.largeraids.util.ChatColorUtil;
 
 import net.kyori.adventure.text.format.NamedTextColor;
 
+import java.util.Locale;
 import java.util.Optional;
 
 import org.bukkit.Location;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Registry;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Animals;
+import org.bukkit.entity.EntityType;
+import org.bukkit.entity.LivingEntity;
+import org.bukkit.entity.Mob;
+import org.bukkit.entity.Monster;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Raider;
 
 /**
  * Adds a certain entity type to all current raiders' attack list for this wave only.
@@ -67,10 +76,8 @@ public class RaiderAttackCommand implements CommandExecutor {
         }
         boolean thruWalls = Boolean.parseBoolean(args[1]);
 
-        Class<?> entityClass;
-        try {
-            entityClass = Class.forName(args[2]);
-        } catch (ClassNotFoundException e) {
+        Class<?> entityClass = resolveEntityClass(args[2]);
+        if (entityClass == null) {
             ChatColorUtil.send(sender, NamedTextColor.RED, this.plugin.getMessage("raider-attack.class-not-found"));
             return false;
         }
@@ -82,5 +89,49 @@ public class RaiderAttackCommand implements CommandExecutor {
                     entityClass.getSimpleName()));
 
         return true;
+    }
+
+    static Class<?> resolveEntityClass(String input) {
+        if (input == null || input.isBlank()) return null;
+        String normalized = input.trim().toLowerCase(Locale.ROOT);
+        int lastDot = normalized.lastIndexOf('.');
+        if (lastDot >= 0 && lastDot + 1 < normalized.length()) {
+            normalized = normalized.substring(lastDot + 1);
+        }
+
+        switch (normalized) {
+            case "livingentity":
+            case "living_entity":
+                return LivingEntity.class;
+            case "mob":
+                return Mob.class;
+            case "monster":
+                return Monster.class;
+            case "animal":
+            case "animals":
+                return Animals.class;
+            case "raider":
+                return Raider.class;
+            case "player":
+            case "serverplayer":
+                return Player.class;
+            default:
+                break;
+        }
+
+        NamespacedKey key = NamespacedKey.fromString(normalized);
+        if (key != null) {
+            EntityType type = Registry.ENTITY_TYPE.get(key);
+            if (type != null && type.getEntityClass() != null) {
+                return type.getEntityClass();
+            }
+        }
+
+        for (EntityType type : Registry.ENTITY_TYPE) {
+            if (type.getKey().getKey().replace("_", "").equals(normalized) && type.getEntityClass() != null) {
+                return type.getEntityClass();
+            }
+        }
+        return null;
     }
 }

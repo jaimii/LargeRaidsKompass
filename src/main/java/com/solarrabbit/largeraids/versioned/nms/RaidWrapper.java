@@ -1,6 +1,7 @@
 package com.solarrabbit.largeraids.versioned.nms;
 
-import java.lang.reflect.Field;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
 import java.util.Collections;
 import java.util.Set;
 import java.util.UUID;
@@ -15,17 +16,17 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.raid.Raid;
 
 public class RaidWrapper implements AbstractRaidWrapper {
-    private static final Field GROUPS_SPAWNED_FIELD;
+    private static final MethodHandle GROUPS_SPAWNED_SETTER;
 
     static {
-        Field field = null;
+        MethodHandle setter = null;
         try {
-            field = Raid.class.getDeclaredField("groupsSpawned");
-            field.setAccessible(true);
-        } catch (NoSuchFieldException e) {
+            setter = MethodHandles.privateLookupIn(Raid.class, MethodHandles.lookup())
+                    .findSetter(Raid.class, "groupsSpawned", int.class);
+        } catch (ReflectiveOperationException e) {
             e.printStackTrace();
         }
-        GROUPS_SPAWNED_FIELD = field;
+        GROUPS_SPAWNED_SETTER = setter;
     }
 
     final Raid raid;
@@ -77,10 +78,10 @@ public class RaidWrapper implements AbstractRaidWrapper {
 
     @Override
     public void setGroupsSpawned(int groupsSpawned) {
-        if (this.raid == null || GROUPS_SPAWNED_FIELD == null) return;
+        if (this.raid == null || GROUPS_SPAWNED_SETTER == null) return;
         try {
-            GROUPS_SPAWNED_FIELD.setInt(this.raid, groupsSpawned);
-        } catch (IllegalAccessException e) {
+            GROUPS_SPAWNED_SETTER.invokeExact(this.raid, groupsSpawned);
+        } catch (Throwable e) {
             e.printStackTrace();
         }
     }
